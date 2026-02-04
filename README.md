@@ -141,46 +141,6 @@ Visit [http://localhost:3000/apply?token=test](http://localhost:3000/apply?token
 | **SMS** | Twilio (for magic links) |
 | **Design** | Scandinavian Warmth design system |
 
----
-
-## 📁 Project Structure
-
-```
-TeamFlow/
-├── app/
-│   ├── page.tsx              # Manager dashboard
-│   ├── apply/page.tsx        # Candidate portal
-│   ├── api/
-│   │   ├── parser/route.ts   # Resume parsing endpoint
-│   │   └── invite/route.ts   # Magic link generation
-│   └── globals.css           # Scandinavian design system
-├── components/
-│   ├── candidate-board.tsx   # Kanban board
-│   ├── candidate-card.tsx    # Candidate cards
-│   ├── drop-zone.tsx         # PDF upload
-│   ├── persona-settings.tsx  # Hiring config modal
-│   └── candidate-portal/     # Multi-step application
-│       ├── CandidateProfile.tsx
-│       ├── SkillsExperience.tsx
-│       └── MotivationQuestions.tsx
-├── lib/
-│   ├── gemini.ts             # AI integration
-│   ├── scoring.ts            # Fit score calculation
-│   └── magic-link.ts         # Token generation
-└── supabase/
-    └── schema.sql            # Database schema
-```
-
----
-
-## 🎨 Design System
-
-TeamFlow uses the **Scandinavian Warmth** design system:
-
-- **Primary**: Sage/Lime (#84CC16) — fresh, optimistic
-- **Neutrals**: Warm stone palette — professional, approachable
-- **Typography**: Plus Jakarta Sans — clean, modern
-- **Components**: Soft shadows, generous border-radius (16px)
 
 ---
 
@@ -204,6 +164,3 @@ MIT © 2024
 
 ---
 
-<p align="center">
-  Built with ☕ and AI
-</p>
