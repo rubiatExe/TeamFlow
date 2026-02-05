@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { BasicInfo, BasicInfoData } from '@/components/candidate-portal/BasicInfo';
 import { CandidateProfile, ProfileData } from '@/components/candidate-portal/CandidateProfile';
 import { SkillsExperience, SkillsData } from '@/components/candidate-portal/SkillsExperience';
 import { MotivationQuestions, MotivationData } from '@/components/candidate-portal/MotivationQuestions';
@@ -16,7 +17,7 @@ interface TokenPayload {
     jobId?: string;
 }
 
-type Step = 'loading' | 'welcome' | 'questions' | 'profile' | 'skills' | 'motivation' | 'passed' | 'failed' | 'complete' | 'error';
+type Step = 'loading' | 'welcome' | 'basicInfo' | 'questions' | 'profile' | 'skills' | 'motivation' | 'passed' | 'failed' | 'complete' | 'error';
 
 interface Question {
     id: string;
@@ -54,13 +55,14 @@ const knockoutQuestions: Question[] = [
 
 // Step configuration for progress indicator
 const STEPS = [
+    { id: 'basicInfo', label: 'Your Info' },
     { id: 'questions', label: 'Quick Check' },
     { id: 'profile', label: 'Availability' },
     { id: 'skills', label: 'Experience' },
     { id: 'motivation', label: 'About You' },
 ];
 
-export default function ApplyPage() {
+function ApplyPageContent() {
     const searchParams = useSearchParams();
     const token = searchParams.get('token');
 
@@ -89,6 +91,14 @@ export default function ApplyPage() {
         whyWorkHere: '',
         superpower: '',
         aboveAndBeyond: '',
+    });
+
+    const [basicInfo, setBasicInfo] = useState<BasicInfoData>({
+        fullName: '',
+        email: '',
+        phone: '',
+        resumeFile: null,
+        resumeUploading: false,
     });
 
     useEffect(() => {
@@ -157,8 +167,8 @@ export default function ApplyPage() {
                     {STEPS.map((s, i) => (
                         <div key={s.id} className="flex items-center">
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${i < currentIndex ? 'bg-lime-500 text-white' :
-                                    i === currentIndex ? 'bg-lime-100 text-lime-700 border-2 border-lime-500' :
-                                        'bg-stone-100 text-stone-400'
+                                i === currentIndex ? 'bg-lime-100 text-lime-700 border-2 border-lime-500' :
+                                    'bg-stone-100 text-stone-400'
                                 }`}>
                                 {i < currentIndex ? '✓' : i + 1}
                             </div>
@@ -180,6 +190,12 @@ export default function ApplyPage() {
         // In production, send all data to API
         console.log('Application submitted:', {
             candidateId: payload?.candidateId,
+            basicInfo: {
+                fullName: basicInfo.fullName,
+                email: basicInfo.email,
+                phone: basicInfo.phone,
+                hasResume: !!basicInfo.resumeFile,
+            },
             knockoutAnswers: answers,
             profile,
             skills,
@@ -224,10 +240,26 @@ export default function ApplyPage() {
                         <Button
                             size="lg"
                             className="text-lg px-8 py-6 bg-lime-500 hover:bg-lime-600 text-white rounded-xl font-medium shadow-sm"
-                            onClick={() => setStep('questions')}
+                            onClick={() => setStep('basicInfo')}
                         >
                             Let&apos;s Go! 🚀
                         </Button>
+                    </div>
+                );
+
+            case 'basicInfo':
+                return (
+                    <div>
+                        {renderProgress()}
+                        <div className="text-center mb-4">
+                            <h2 className="text-xl font-semibold text-stone-800">👋 Tell us about yourself</h2>
+                            <p className="text-sm text-stone-400">We&apos;ll use this to stay in touch</p>
+                        </div>
+                        <BasicInfo
+                            data={basicInfo}
+                            onChange={setBasicInfo}
+                            onNext={() => setStep('questions')}
+                        />
                     </div>
                 );
 
@@ -414,21 +446,49 @@ export default function ApplyPage() {
     };
 
     return (
+        <Card className="w-full max-w-lg bg-white border-stone-200 shadow-lg rounded-2xl">
+            <CardHeader className="text-center border-b border-stone-100 pb-4">
+                <CardTitle className="flex items-center justify-center gap-2 text-xl font-semibold text-stone-800">
+                    <span>🌿</span>
+                    <span>TeamFlow</span>
+                </CardTitle>
+                {payload?.merchantName && (
+                    <p className="text-stone-400 text-sm">Application for {payload.merchantName}</p>
+                )}
+            </CardHeader>
+            <CardContent className="pt-6">
+                {renderContent()}
+            </CardContent>
+        </Card>
+    );
+}
+
+function LoadingFallback() {
+    return (
+        <Card className="w-full max-w-lg bg-white border-stone-200 shadow-lg rounded-2xl">
+            <CardHeader className="text-center border-b border-stone-100 pb-4">
+                <CardTitle className="flex items-center justify-center gap-2 text-xl font-semibold text-stone-800">
+                    <span>🌿</span>
+                    <span>TeamFlow</span>
+                </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-6">
+                <div className="text-center py-20">
+                    <div className="animate-spin h-8 w-8 border-4 border-lime-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+                    <p className="text-stone-400">Loading your application...</p>
+                </div>
+            </CardContent>
+        </Card>
+    );
+}
+
+export default function ApplyPage() {
+    return (
         <div className="min-h-screen bg-stone-50 flex items-center justify-center p-4">
-            <Card className="w-full max-w-lg bg-white border-stone-200 shadow-lg rounded-2xl">
-                <CardHeader className="text-center border-b border-stone-100 pb-4">
-                    <CardTitle className="flex items-center justify-center gap-2 text-xl font-semibold text-stone-800">
-                        <span>🌿</span>
-                        <span>TeamFlow</span>
-                    </CardTitle>
-                    {payload?.merchantName && (
-                        <p className="text-stone-400 text-sm">Application for {payload.merchantName}</p>
-                    )}
-                </CardHeader>
-                <CardContent className="pt-6">
-                    {renderContent()}
-                </CardContent>
-            </Card>
+            <Suspense fallback={<LoadingFallback />}>
+                <ApplyPageContent />
+            </Suspense>
         </div>
     );
 }
+
