@@ -4,7 +4,7 @@ import React from 'react';
 import { CandidateCard } from './candidate-card';
 import { ParserOutput } from '@/app/api/types';
 
-export type CandidateStatus = 'new' | 'invited' | 'interviewed' | 'hired';
+export type CandidateStatus = 'pending' | 'new' | 'invited' | 'interviewed' | 'hired';
 
 export interface CandidateWithStatus {
     data: ParserOutput;
@@ -18,6 +18,7 @@ interface CandidateBoardProps {
 }
 
 const columns: { key: CandidateStatus; label: string; color: string; bg: string }[] = [
+    { key: 'pending', label: '⏳ Pending', color: 'border-stone-400', bg: 'bg-stone-100' },
     { key: 'new', label: '🆕 New', color: 'border-blue-400', bg: 'bg-blue-50' },
     { key: 'invited', label: '📧 Invited', color: 'border-amber-400', bg: 'bg-amber-50' },
     { key: 'interviewed', label: '🎤 Interviewed', color: 'border-purple-400', bg: 'bg-purple-50' },
@@ -48,7 +49,8 @@ export function CandidateBoard({ candidates, onStatusChange }: CandidateBoardPro
                     <div className="space-y-4 min-h-[200px]">
                         {getCandidatesByStatus(column.key).length === 0 ? (
                             <div className="text-center text-stone-400 text-sm py-12">
-                                {column.key === 'new' ? 'Drop resumes to add' : 'No candidates yet'}
+                                {column.key === 'pending' ? 'Upload resumes to start' :
+                                    column.key === 'new' ? 'Candidates who completed portal' : 'No candidates yet'}
                             </div>
                         ) : (
                             getCandidatesByStatus(column.key).map((candidate) => (

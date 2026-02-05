@@ -15,18 +15,19 @@ import { ParserOutput } from '@/app/api/types';
 interface CandidateCardProps {
     candidateId?: string;
     data: ParserOutput;
-    status?: 'new' | 'invited' | 'interviewed' | 'hired';
+    status?: 'pending' | 'new' | 'invited' | 'interviewed' | 'hired';
     onInvite?: (candidateId: string) => void;
 }
 
 const statusColors: Record<string, string> = {
+    pending: 'bg-stone-100 text-stone-600',
     new: 'bg-blue-100 text-blue-700',
     invited: 'bg-amber-100 text-amber-700',
     interviewed: 'bg-purple-100 text-purple-700',
     hired: 'bg-lime-100 text-lime-700',
 };
 
-export function CandidateCard({ candidateId, data, status = 'new', onInvite }: CandidateCardProps) {
+export function CandidateCard({ candidateId, data, status = 'pending', onInvite }: CandidateCardProps) {
     const { candidate, score, red_flags } = data;
     const [inviting, setInviting] = useState(false);
 
@@ -137,14 +138,17 @@ export function CandidateCard({ candidateId, data, status = 'new', onInvite }: C
                     </div>
                 )}
 
-                {status === 'new' && onInvite && (
+                {(status === 'pending' || status === 'new') && onInvite && (
                     <Button
                         size="sm"
-                        className="w-full mt-4 bg-lime-500 hover:bg-lime-600 text-white rounded-xl font-medium shadow-sm hover:shadow"
+                        className={`w-full mt-4 rounded-xl font-medium shadow-sm hover:shadow ${status === 'pending'
+                                ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                                : 'bg-lime-500 hover:bg-lime-600 text-white'
+                            }`}
                         onClick={handleInvite}
                         disabled={inviting}
                     >
-                        {inviting ? '📧 Sending...' : '📧 Invite to Interview'}
+                        {inviting ? '📧 Sending...' : '📧 Send Invite Link'}
                     </Button>
                 )}
             </CardContent>

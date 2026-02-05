@@ -1,18 +1,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import { ParserInputSchema, ParserOutput } from '../types';
-import { parseResumeWithGemini } from '@/lib/gemini';
-import { createClient } from '@supabase/supabase-js';
+import { ParserInputSchema, ParserOutput, ParserOutputSchema } from '../types';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Initialize Supabase (Service Role needed for writing to likely RLS protected tables?)
-// Actually, for now we use the anon key if RLS allows, or the authenticated user.
-// Since this is a server route called by the client, we might need to forward auth cookies.
-// But for Sprint 1/2 we are just getting it working.
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
-
-const PYTHON_SERVICE_URL = process.env.PYTHON_SERVICE_URL || 'http://localhost:8000';
+// Initialize Gemini
+const apiKey = process.env.GOOGLE_API_KEY;
+const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
+const model = genAI?.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
 export async function POST(req: NextRequest) {
     try {
@@ -24,93 +18,127 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: validation.error.flatten() }, { status: 400 });
         }
 
-        const { fileUrl, jobId } = validation.data;
-        console.log(`[Parser] Processing file: ${fileUrl}`);
+        const { fileUrl, fileData, mimeType: inputMimeType, fileName, jobId } = validation.data;
+        console.log(`[Parser] Processing: ${fileName || fileUrl || 'unknown'}`);
 
-        // 2. Fetch the PDF file
-        // Note: if fileUrl is public, we can just fetch it.
-        const fileRes = await fetch(fileUrl);
-        if (!fileRes.ok) {
-            throw new Error(`Failed to fetch file from storage: ${fileRes.statusText}`);
+        let base64Data: string;
+        let mimeType: string;
+
+        // 2. Get file data - either from direct upload or URL
+        if (fileData) {
+            // Direct base64 data from client
+            base64Data = fileData;
+            mimeType = inputMimeType || 'application/pdf';
+            console.log(`[Parser] Using direct file data, mime: ${mimeType}`);
+        } else if (fileUrl) {
+            // Fetch from URL (legacy)
+            const fileRes = await fetch(fileUrl);
+            if (!fileRes.ok) {
+                throw new Error(`Failed to fetch file from storage: ${fileRes.statusText}`);
+            }
+            const fileBlob = await fileRes.blob();
+            const arrayBuffer = await fileBlob.arrayBuffer();
+            base64Data = Buffer.from(arrayBuffer).toString('base64');
+            const contentType = fileRes.headers.get('content-type') || 'application/pdf';
+            mimeType = contentType.includes('image') ? contentType : 'application/pdf';
+        } else {
+            return NextResponse.json({ error: 'No file data provided' }, { status: 400 });
         }
-        const fileBlob = await fileRes.blob();
 
-        // 3. Send to Nougat (Python Service) for LaTeX
-        const formData = new FormData();
-        formData.append('file', fileBlob, 'resume.pdf');
+        // 3. Get Job Context 
+        const context = {
+            dealbreakers: ['Weekend availability required', 'Must be 18+'],
+            jobDescription: 'Barista position at a coffee shop'
+        };
 
-        let latex = "";
+        // 4. Use Gemini to analyze the resume directly (multimodal)
+        if (!model || !apiKey) {
+            console.log('[Parser] No Gemini API key, returning mock data');
+            const mockData: ParserOutput = {
+                candidate: {
+                    name: 'Sample Candidate',
+                    email: 'sample@email.com',
+                    skills: ['Communication', 'Customer Service'],
+                },
+                score: {
+                    total: 75,
+                    breakdown: { constraints: 40, experience: 20, logistics: 15 },
+                    explanation: 'Mock data - No API key configured'
+                },
+                red_flags: []
+            };
+            return NextResponse.json(mockData);
+        }
+
+        const prompt = `
+You are an expert HR Recruiter analyzing a resume for a job position.
+
+JOB CONTEXT:
+- Position: ${context.jobDescription}
+- Dealbreakers: ${JSON.stringify(context.dealbreakers)}
+
+TASK: Analyze this resume and extract the following information. Be thorough and accurate.
+
+OUTPUT JSON FORMAT (respond with ONLY valid JSON):
+{
+  "candidate": {
+    "name": "Full name from resume",
+    "email": "Email if found",
+    "phone": "Phone if found", 
+    "city": "City/location if found",
+    "skills": ["list", "of", "skills"],
+    "experience_years": number
+  },
+  "score": {
+    "total": number (0-100 fit score),
+    "breakdown": {
+      "constraints": number (0-50, dealbreakers passed),
+      "experience": number (0-30, skill match),
+      "logistics": number (0-20, location fit)
+    },
+    "explanation": "Brief explanation of the score"
+  },
+  "red_flags": ["any concerns like employment gaps, job hopping, etc"]
+}`;
+
         try {
-            const nougatRes = await fetch(`${PYTHON_SERVICE_URL}/extract`, {
-                method: 'POST',
-                body: formData,
+            const result = await model.generateContent({
+                contents: [{
+                    role: 'user',
+                    parts: [
+                        { text: prompt },
+                        { inlineData: { mimeType, data: base64Data } }
+                    ]
+                }],
+                generationConfig: { responseMimeType: 'application/json' }
             });
 
-            if (!nougatRes.ok) {
-                console.error("Nougat Service Error:", await nougatRes.text());
-                // Fallback or Error?
-                // For now, if Python fails (e.g. not running), we might want to fail hard or fallback.
-                throw new Error("Nougat Service failed");
+            const responseText = result.response.text();
+            console.log('[Parser] Gemini response received');
+
+            const parsedData = JSON.parse(responseText);
+            const validated = ParserOutputSchema.safeParse(parsedData);
+
+            if (!validated.success) {
+                console.error('[Parser] Validation failed:', validated.error);
+                // Return what we got even if validation partially fails
+                return NextResponse.json(parsedData);
             }
 
-            const nougatJson = await nougatRes.json();
-            latex = nougatJson.latex;
-        } catch (err) {
-            console.error("Nougat Connection Failed (Is python_service running?). Using Mock LaTeX.");
-            latex = "% Mock LaTeX due to service failure\n\\section*{Mock Candidate}...";
+            console.log('[Parser] Successfully parsed candidate:', validated.data.candidate.name);
+            return NextResponse.json(validated.data);
+
+        } catch (geminiErr) {
+            console.error('[Parser] Gemini error:', geminiErr);
+            return NextResponse.json({
+                error: 'Failed to analyze resume',
+                details: geminiErr instanceof Error ? geminiErr.message : 'Unknown error'
+            }, { status: 500 });
         }
-
-        // 4. Send to Gemini for Intelligence
-        // Retrieve Job Context if jobId is provided
-        let context: { dealbreakers: string[]; jobDescription?: string } = { dealbreakers: [], jobDescription: "" };
-        if (jobId) {
-            const { data: job } = await supabase.from('jobs').select('*').eq('id', jobId).single();
-            if (job) {
-                context = {
-                    dealbreakers: job.dealbreakers as string[],
-                    jobDescription: job.description
-                };
-            }
-        }
-
-        const parsedData = await parseResumeWithGemini(latex, context);
-
-        if (!parsedData) {
-            return NextResponse.json({ error: 'Failed to analyze resume with AI' }, { status: 500 });
-        }
-
-        // 5. Save to Database (Candidates Table)
-        // We need a merchant_id. For now, we'll assume a dummy one or fetch from context if we had auth.
-        // In a real app, we'd get this from the session.
-        // Let's Insert a new row.
-        const { data: candidate, error: dbError } = await supabase
-            .from('candidates')
-            .insert({
-                merchant_id: '00000000-0000-0000-0000-000000000000', // Placeholder UUID
-                name: parsedData.candidate.name,
-                email: parsedData.candidate.email,
-                phone: parsedData.candidate.phone,
-                city: parsedData.candidate.city,
-                resume_url: fileUrl,
-                resume_text: latex, // Store the latex
-                fit_score: parsedData.score.total,
-                analysis: parsedData, // Store full JSON
-                red_flags: parsedData.red_flags,
-                summary: parsedData.score.explanation,
-                status: 'new'
-            })
-            .select()
-            .single();
-
-        if (dbError) {
-            console.error("Database Insert Error:", dbError);
-            // We still return the data to the client even if DB save fails for this Sprint demo
-        }
-
-        return NextResponse.json(parsedData);
 
     } catch (error) {
-        console.error('Parser API Error:', error);
+        console.error('[Parser] API Error:', error);
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
+

@@ -42,11 +42,17 @@ export interface Candidate {
 
 // --- API Request/Response Schemas ---
 
-// 1. Parser API Input
+// 1. Parser API Input - accepts either URL or direct file data
 // POST /api/parser
 export const ParserInputSchema = z.object({
-    fileUrl: z.string().url(), // Path to the PDF in Supabase Storage
-    jobId: z.string().uuid().optional(), // To fetch specific constraints
+    // Option 1: URL-based (legacy)
+    fileUrl: z.string().url().optional(),
+    // Option 2: Direct file data (base64)
+    fileData: z.string().optional(),
+    mimeType: z.string().optional(),
+    fileName: z.string().optional(),
+    // Job context
+    jobId: z.string().uuid().optional(),
 });
 
 export type ParserInput = z.infer<typeof ParserInputSchema>;

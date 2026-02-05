@@ -149,7 +149,7 @@ export default function Dashboard() {
     const newCandidate: CandidateWithStatus = {
       id: `candidate_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       data: result as ParserOutput,
-      status: 'new',
+      status: 'pending',
     };
     setCandidates(prev => [newCandidate, ...prev]);
   }, []);
