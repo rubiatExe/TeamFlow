@@ -53,6 +53,8 @@ export const ParserInputSchema = z.object({
     fileName: z.string().optional(),
     // Job context
     jobId: z.string().uuid().optional(),
+    // Role context — which café role is the candidate being evaluated for
+    roleId: z.string().optional(),
 });
 
 export type ParserInput = z.infer<typeof ParserInputSchema>;
@@ -61,11 +63,12 @@ export type ParserInput = z.infer<typeof ParserInputSchema>;
 export const ParserOutputSchema = z.object({
     candidate: z.object({
         name: z.string(),
-        email: z.string().email().optional().or(z.literal('')),
+        email: z.string().optional().or(z.literal('')),
         phone: z.string().optional().or(z.literal('')),
         city: z.string().optional().or(z.literal('')),
         skills: z.array(z.string()),
         experience_years: z.number().optional(),
+        applied_role: z.string().optional(),
     }),
     score: z.object({
         total: z.number().min(0).max(100),

@@ -9,49 +9,17 @@ import { BasicInfo, BasicInfoData } from '@/components/candidate-portal/BasicInf
 import { CandidateProfile, ProfileData } from '@/components/candidate-portal/CandidateProfile';
 import { SkillsExperience, SkillsData } from '@/components/candidate-portal/SkillsExperience';
 import { MotivationQuestions, MotivationData } from '@/components/candidate-portal/MotivationQuestions';
+import { getRoleOrDefault, type RoleQuestion } from '@/lib/roles';
 
 interface TokenPayload {
     candidateId: string;
     candidateName: string;
     merchantName?: string;
     jobId?: string;
+    roleId?: string;
 }
 
 type Step = 'loading' | 'welcome' | 'basicInfo' | 'questions' | 'profile' | 'skills' | 'motivation' | 'passed' | 'failed' | 'complete' | 'error';
-
-interface Question {
-    id: string;
-    text: string;
-    type: 'boolean' | 'choice' | 'text';
-    required: boolean;
-    dealbreaker?: boolean;
-    options?: string[];
-}
-
-// Sample knockout questions (would come from Hiring Persona in production)
-const knockoutQuestions: Question[] = [
-    {
-        id: 'age',
-        text: 'Are you at least 18 years of age?',
-        type: 'boolean',
-        required: true,
-        dealbreaker: true,
-    },
-    {
-        id: 'work_auth',
-        text: 'Are you legally authorized to work in the United States?',
-        type: 'boolean',
-        required: true,
-        dealbreaker: true,
-    },
-    {
-        id: 'weekends',
-        text: 'Can you work weekends (Saturdays and Sundays)?',
-        type: 'boolean',
-        required: true,
-        dealbreaker: true,
-    },
-];
 
 // Step configuration for progress indicator
 const STEPS = [
@@ -70,6 +38,7 @@ function ApplyPageContent() {
     const [payload, setPayload] = useState<TokenPayload | null>(null);
     const [answers, setAnswers] = useState<Record<string, string | boolean>>({});
     const [currentQuestion, setCurrentQuestion] = useState(0);
+    const [submitting, setSubmitting] = useState(false);
 
     // New state for enhanced sections
     const [profile, setProfile] = useState<ProfileData>({
@@ -91,6 +60,7 @@ function ApplyPageContent() {
         whyWorkHere: '',
         superpower: '',
         aboveAndBeyond: '',
+        skillAnswers: {},
     });
 
     const [basicInfo, setBasicInfo] = useState<BasicInfoData>({
@@ -99,7 +69,12 @@ function ApplyPageContent() {
         phone: '',
         resumeFile: null,
         resumeUploading: false,
+        selectedRoleId: 'barista',
     });
+
+    // Get the role based on what the candidate selected
+    const selectedRole = getRoleOrDefault(basicInfo.selectedRoleId);
+    const knockoutQuestions: RoleQuestion[] = selectedRole.questions.knockout;
 
     useEffect(() => {
         if (!token) {
@@ -115,13 +90,17 @@ function ApplyPageContent() {
                 const payloadStr = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
                 const decoded = JSON.parse(payloadStr) as TokenPayload;
                 setPayload(decoded);
+                // If token includes roleId, pre-select it
+                if (decoded.roleId) {
+                    setBasicInfo(prev => ({ ...prev, selectedRoleId: decoded.roleId! }));
+                }
                 setStep('welcome');
             } else {
                 // Mock token for testing
                 setPayload({
                     candidateId: 'demo_1',
                     candidateName: 'Demo Candidate',
-                    merchantName: "Joe's Coffee",
+                    merchantName: "Cocoa Bakery",
                 });
                 setStep('welcome');
             }
@@ -129,7 +108,7 @@ function ApplyPageContent() {
             setPayload({
                 candidateId: 'demo_1',
                 candidateName: 'Demo Candidate',
-                merchantName: "Joe's Coffee",
+                merchantName: "Cocoa Bakery",
             });
             setStep('welcome');
         }
@@ -140,7 +119,7 @@ function ApplyPageContent() {
         setAnswers(prev => ({ ...prev, [questionId]: answer }));
 
         // Check if dealbreaker failed
-        if (question.dealbreaker && answer === false) {
+        if (question.failValue && String(answer) === question.failValue) {
             setStep('failed');
             return;
         }
@@ -186,10 +165,12 @@ function ApplyPageContent() {
         );
     };
 
-    const handleSubmitApplication = () => {
-        // In production, send all data to API
-        console.log('Application submitted:', {
+    const handleSubmitApplication = async () => {
+        setSubmitting(true);
+
+        const applicationData = {
             candidateId: payload?.candidateId,
+            roleId: basicInfo.selectedRoleId,
             basicInfo: {
                 fullName: basicInfo.fullName,
                 email: basicInfo.email,
@@ -200,9 +181,30 @@ function ApplyPageContent() {
             profile,
             skills,
             motivation,
-            submittedAt: new Date().toISOString(),
-        });
-        setStep('complete');
+        };
+
+        try {
+            const res = await fetch('/api/application', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(applicationData),
+            });
+
+            const result = await res.json();
+            console.log('[Application] Submitted:', result);
+
+            if (result.success) {
+                setStep('complete');
+            } else {
+                console.error('[Application] Submission failed:', result.error);
+                setStep('complete'); // Still show complete for now
+            }
+        } catch (err) {
+            console.error('[Application] Network error:', err);
+            setStep('complete'); // Graceful fallback
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     const renderContent = () => {
@@ -258,13 +260,22 @@ function ApplyPageContent() {
                         <BasicInfo
                             data={basicInfo}
                             onChange={setBasicInfo}
-                            onNext={() => setStep('questions')}
+                            onNext={() => {
+                                // Reset knockout state when role changes
+                                setCurrentQuestion(0);
+                                setAnswers({});
+                                setStep('questions');
+                            }}
                         />
                     </div>
                 );
 
-            case 'questions':
+            case 'questions': {
                 const question = knockoutQuestions[currentQuestion];
+                if (!question) {
+                    setStep('profile');
+                    return null;
+                }
                 return (
                     <div className="py-6">
                         {renderProgress()}
@@ -273,13 +284,15 @@ function ApplyPageContent() {
                                 <Badge variant="secondary" className="bg-stone-100 text-stone-600 font-medium">
                                     Question {currentQuestion + 1} of {knockoutQuestions.length}
                                 </Badge>
-                                {question.dealbreaker && (
-                                    <Badge className="bg-red-100 text-red-700 font-medium">Required</Badge>
-                                )}
+                                <Badge className="bg-red-100 text-red-700 font-medium">Required</Badge>
+                            </div>
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-lime-50 border border-lime-200 rounded-lg mb-4">
+                                <span className="text-sm">{selectedRole.emoji}</span>
+                                <span className="text-xs font-medium text-lime-700">{selectedRole.title} Position</span>
                             </div>
                         </div>
 
-                        <h3 className="text-xl font-semibold text-stone-800 mb-8">{question.text}</h3>
+                        <h3 className="text-xl font-semibold text-stone-800 mb-8">{question.question}</h3>
 
                         {question.type === 'boolean' && (
                             <div className="flex gap-4">
@@ -301,7 +314,7 @@ function ApplyPageContent() {
                             </div>
                         )}
 
-                        {question.type === 'choice' && question.options && (
+                        {question.type === 'select' && question.options && (
                             <div className="space-y-3">
                                 {question.options.map((option, i) => (
                                     <Button
@@ -318,6 +331,7 @@ function ApplyPageContent() {
                         )}
                     </div>
                 );
+            }
 
             case 'profile':
                 return (
@@ -352,6 +366,7 @@ function ApplyPageContent() {
                             onChange={setSkills}
                             onNext={() => setStep('motivation')}
                             onBack={() => setStep('profile')}
+                            roleId={basicInfo.selectedRoleId}
                         />
                     </div>
                 );
@@ -370,6 +385,7 @@ function ApplyPageContent() {
                             onNext={() => setStep('passed')}
                             onBack={() => setStep('skills')}
                             merchantName={payload?.merchantName}
+                            roleId={basicInfo.selectedRoleId}
                         />
                     </div>
                 );
@@ -389,13 +405,15 @@ function ApplyPageContent() {
                                 size="lg"
                                 className="w-full text-lg py-6 bg-lime-500 hover:bg-lime-600 text-white rounded-xl font-medium"
                                 onClick={handleSubmitApplication}
+                                disabled={submitting}
                             >
-                                Submit & Schedule Interview 📅
+                                {submitting ? '📤 Submitting...' : 'Submit & Schedule Interview 📅'}
                             </Button>
                             <Button
                                 variant="ghost"
                                 onClick={() => setStep('motivation')}
                                 className="text-stone-400 hover:text-stone-600"
+                                disabled={submitting}
                             >
                                 ← Go back and review
                             </Button>
@@ -491,4 +509,3 @@ export default function ApplyPage() {
         </div>
     );
 }
-

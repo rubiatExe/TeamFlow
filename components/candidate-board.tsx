@@ -15,6 +15,7 @@ export interface CandidateWithStatus {
 interface CandidateBoardProps {
     candidates: CandidateWithStatus[];
     onStatusChange?: (candidateId: string, newStatus: CandidateStatus) => void;
+    onRemove?: (candidateId: string) => void;
 }
 
 const columns: { key: CandidateStatus; label: string; color: string; bg: string }[] = [
@@ -25,7 +26,7 @@ const columns: { key: CandidateStatus; label: string; color: string; bg: string 
     { key: 'hired', label: '✅ Hired', color: 'border-lime-500', bg: 'bg-lime-50' },
 ];
 
-export function CandidateBoard({ candidates, onStatusChange }: CandidateBoardProps) {
+export function CandidateBoard({ candidates, onStatusChange, onRemove }: CandidateBoardProps) {
     const getCandidatesByStatus = (status: CandidateStatus) => {
         return candidates
             .filter(c => c.status === status)
@@ -62,9 +63,20 @@ export function CandidateBoard({ candidates, onStatusChange }: CandidateBoardPro
                                         onInvite={(id) => onStatusChange?.(id, 'invited')}
                                     />
 
+                                    {/* Remove Button — visible on hover at all stages */}
+                                    {onRemove && (
+                                        <button
+                                            onClick={() => onRemove(candidate.id)}
+                                            className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity w-7 h-7 flex items-center justify-center bg-white border border-stone-200 rounded-lg text-stone-400 hover:text-red-500 hover:border-red-300 hover:bg-red-50 shadow-sm cursor-pointer z-10"
+                                            title="Remove candidate"
+                                        >
+                                            ✕
+                                        </button>
+                                    )}
+
                                     {/* Status Change Dropdown */}
                                     {onStatusChange && column.key !== 'hired' && (
-                                        <div className="absolute top-3 right-14 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <div className="absolute top-3 right-12 opacity-0 group-hover:opacity-100 transition-opacity">
                                             <select
                                                 className="text-xs bg-white border border-stone-200 rounded-lg px-2 py-1 text-stone-600 shadow-sm cursor-pointer hover:border-stone-300"
                                                 value={candidate.status}

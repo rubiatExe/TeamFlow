@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { DemoToggleWrapper } from "@/components/demo-toggle-wrapper";
+import { ToastProvider } from "@/components/ui/toast";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -14,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TeamFlow",
-  description: "Smart hiring for hourly roles",
+  title: "TeamFlow — Smart Hiring for Hourly Roles",
+  description: "AI-native hiring agent for cafés, restaurants, and retail. Upload resumes, score candidates, and hire faster.",
 };
 
 export default function RootLayout({
@@ -28,7 +29,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        <ToastProvider>
+          {children}
+        </ToastProvider>
         <DemoToggleWrapper />
       </body>
     </html>

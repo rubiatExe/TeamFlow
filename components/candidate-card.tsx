@@ -11,6 +11,7 @@ import {
     TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { ParserOutput } from '@/app/api/types';
+import { getRoleById } from '@/lib/roles';
 
 interface CandidateCardProps {
     candidateId?: string;
@@ -43,7 +44,7 @@ export function CandidateCard({ candidateId, data, status = 'pending', onInvite 
                     candidateName: candidate.name,
                     candidateEmail: candidate.email,
                     candidatePhone: candidate.phone,
-                    storeName: "Joe's Coffee",
+                    storeName: "Cocoa Bakery",
                 }),
             });
             const data = await res.json();
@@ -62,13 +63,22 @@ export function CandidateCard({ candidateId, data, status = 'pending', onInvite 
         return 'text-red-600';
     };
 
+    const appliedRole = candidate.applied_role ? getRoleById(candidate.applied_role) : undefined;
+
     return (
         <Card className="bg-white border border-stone-200 hover:border-stone-300 transition-all duration-200 shadow-sm hover:shadow-md rounded-2xl">
             <CardHeader className="pb-3 pt-5 px-5">
                 <div className="flex justify-between items-start gap-2">
-                    <CardTitle className="text-lg font-semibold text-stone-800 leading-tight">
-                        {candidate.name}
-                    </CardTitle>
+                    <div>
+                        <CardTitle className="text-lg font-semibold text-stone-800 leading-tight">
+                            {candidate.name}
+                        </CardTitle>
+                        {appliedRole && (
+                            <span className="text-xs text-stone-400 mt-0.5 inline-flex items-center gap-1">
+                                {appliedRole.emoji} {appliedRole.title}
+                            </span>
+                        )}
+                    </div>
                     <Badge className={`${statusColors[status]} text-xs font-medium px-3 py-1 rounded-lg`}>
                         {status.charAt(0).toUpperCase() + status.slice(1)}
                     </Badge>

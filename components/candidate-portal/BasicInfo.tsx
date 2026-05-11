@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
+import { CAFE_ROLES } from '@/lib/roles';
 
 export interface BasicInfoData {
     fullName: string;
@@ -9,6 +10,7 @@ export interface BasicInfoData {
     phone: string;
     resumeFile: File | null;
     resumeUploading: boolean;
+    selectedRoleId: string;
 }
 
 interface BasicInfoProps {
@@ -74,10 +76,42 @@ export function BasicInfo({ data, onChange, onNext }: BasicInfoProps) {
 
     const isValid = data.fullName.trim().length >= 2 &&
         isValidEmail(data.email) &&
-        data.phone.replace(/\D/g, '').length >= 10;
+        data.phone.replace(/\D/g, '').length >= 10 &&
+        data.selectedRoleId !== '';
 
     return (
         <div className="py-4 space-y-5">
+            {/* Role Selector — First Step */}
+            <div>
+                <label className="block text-base font-semibold text-stone-800 mb-2">
+                    What position are you applying for? <span className="text-red-500">*</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                    {CAFE_ROLES.map(role => (
+                        <button
+                            key={role.id}
+                            onClick={() => onChange({ ...data, selectedRoleId: role.id })}
+                            className={`p-3 rounded-xl text-left transition-all ${data.selectedRoleId === role.id
+                                    ? 'bg-lime-100 border-2 border-lime-500'
+                                    : 'bg-stone-50 border-2 border-stone-200 hover:border-stone-300'
+                                }`}
+                        >
+                            <div className="flex items-center gap-2">
+                                <span className="text-xl">{role.emoji}</span>
+                                <div>
+                                    <p className={`font-medium text-sm ${data.selectedRoleId === role.id ? 'text-lime-800' : 'text-stone-700'}`}>
+                                        {role.title}
+                                    </p>
+                                    <p className={`text-xs ${data.selectedRoleId === role.id ? 'text-lime-600' : 'text-stone-400'}`}>
+                                        ${role.wageRange.min}-${role.wageRange.max}/hr
+                                    </p>
+                                </div>
+                            </div>
+                        </button>
+                    ))}
+                </div>
+            </div>
+
             {/* Full Name */}
             <div>
                 <label className="block text-base font-semibold text-stone-800 mb-2">

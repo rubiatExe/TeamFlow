@@ -8,6 +8,7 @@ export interface MagicLinkPayload {
     jobId?: string;
     merchantId?: string;
     merchantName?: string;
+    roleId?: string;
 }
 
 /**

@@ -3,6 +3,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { getRoleOrDefault, type CafeRole } from '@/lib/roles';
 
 interface SkillsData {
     yearsExperience: string;
@@ -16,7 +17,7 @@ interface SkillsExperienceProps {
     onChange: (data: SkillsData) => void;
     onNext: () => void;
     onBack: () => void;
-    jobRole?: string;
+    roleId?: string;
 }
 
 const EXPERIENCE_LEVELS = [
@@ -24,28 +25,6 @@ const EXPERIENCE_LEVELS = [
     { id: '1-3', label: '1-3 years', emoji: '🌿' },
     { id: '3-5', label: '3-5 years', emoji: '🌳' },
     { id: '5+', label: '5+ years', emoji: '🏆' },
-];
-
-// Skills vary by role - this is for food service/retail
-const SKILLS = [
-    { id: 'customer_service', label: '😊 Customer Service' },
-    { id: 'pos_register', label: '💳 POS/Register' },
-    { id: 'espresso_machine', label: '☕ Espresso Machine' },
-    { id: 'latte_art', label: '🎨 Latte Art' },
-    { id: 'food_prep', label: '🍳 Food Preparation' },
-    { id: 'inventory', label: '📦 Inventory Management' },
-    { id: 'cleaning', label: '🧹 Cleaning/Sanitation' },
-    { id: 'cash_handling', label: '💵 Cash Handling' },
-    { id: 'opening_closing', label: '🔑 Opening/Closing' },
-    { id: 'training', label: '👥 Training Others' },
-];
-
-const CERTIFICATIONS = [
-    { id: 'food_handler', label: "🍽️ Food Handler's Permit" },
-    { id: 'servsafe', label: '✅ ServSafe Certified' },
-    { id: 'barista_cert', label: '☕ Barista Certification' },
-    { id: 'first_aid', label: '🩹 First Aid/CPR' },
-    { id: 'tips', label: '🍺 TIPS Alcohol Training' },
 ];
 
 const LANGUAGES = [
@@ -59,7 +38,13 @@ const LANGUAGES = [
     { id: 'arabic', label: 'Arabic' },
 ];
 
-export function SkillsExperience({ data, onChange, onNext, onBack }: SkillsExperienceProps) {
+export function SkillsExperience({ data, onChange, onNext, onBack, roleId }: SkillsExperienceProps) {
+    const role: CafeRole = getRoleOrDefault(roleId);
+
+    // Combine essential + nice-to-have skills for the role
+    const roleSkills = [...role.essentialSkills, ...role.niceToHaveSkills];
+    const roleCertifications = role.certifications;
+
     const toggleItem = (field: 'skills' | 'certifications' | 'languages', itemId: string) => {
         const current = data[field];
         const updated = current.includes(itemId)
@@ -72,10 +57,18 @@ export function SkillsExperience({ data, onChange, onNext, onBack }: SkillsExper
 
     return (
         <div className="py-4 space-y-6">
+            {/* Role-specific header */}
+            <div className="flex items-center gap-2 px-3 py-2 bg-lime-50 border border-lime-200 rounded-xl">
+                <span className="text-xl">{role.emoji}</span>
+                <span className="text-sm font-medium text-lime-800">
+                    Applying for: {role.title}
+                </span>
+            </div>
+
             {/* Experience Level */}
             <div>
                 <h3 className="text-base font-semibold text-stone-800 mb-3">
-                    How much relevant work experience do you have?
+                    How much relevant {role.title.toLowerCase()} experience do you have?
                 </h3>
                 <div className="grid grid-cols-2 gap-2">
                     {EXPERIENCE_LEVELS.map(level => (
@@ -93,14 +86,14 @@ export function SkillsExperience({ data, onChange, onNext, onBack }: SkillsExper
                 </div>
             </div>
 
-            {/* Skills */}
+            {/* Skills — dynamically loaded from role config */}
             <div>
                 <h3 className="text-base font-semibold text-stone-800 mb-2">
                     What skills do you have? <span className="text-stone-400 font-normal">(select all that apply)</span>
                 </h3>
-                <p className="text-xs text-stone-400 mb-3">Even if you're still learning!</p>
+                <p className="text-xs text-stone-400 mb-3">Even if you&apos;re still learning!</p>
                 <div className="flex flex-wrap gap-2">
-                    {SKILLS.map(skill => (
+                    {roleSkills.map(skill => (
                         <Badge
                             key={skill.id}
                             onClick={() => toggleItem('skills', skill.id)}
@@ -115,13 +108,13 @@ export function SkillsExperience({ data, onChange, onNext, onBack }: SkillsExper
                 </div>
             </div>
 
-            {/* Certifications */}
+            {/* Certifications — dynamically loaded from role config */}
             <div>
                 <h3 className="text-base font-semibold text-stone-800 mb-2">
                     Any certifications? <span className="text-stone-400 font-normal">(optional)</span>
                 </h3>
                 <div className="flex flex-wrap gap-2">
-                    {CERTIFICATIONS.map(cert => (
+                    {roleCertifications.map(cert => (
                         <Badge
                             key={cert.id}
                             onClick={() => toggleItem('certifications', cert.id)}

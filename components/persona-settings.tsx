@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { getRoleOrDefault, type CafeRole } from '@/lib/roles';
 
 export interface HiringPersona {
     jobTitle: string;
@@ -18,31 +19,31 @@ interface PersonaSettingsProps {
     persona: HiringPersona;
     onSave: (persona: HiringPersona) => void;
     onClose: () => void;
+    roleId?: string;
 }
 
-const COMMON_DEALBREAKERS = [
-    "Weekend availability required",
-    "Must be 18+",
-    "Valid work authorization",
-    "Food Handler's Permit",
-    "Reliable transportation",
-    "Available for closing shifts",
-    "Minimum 20 hrs/week",
-];
+export function PersonaSettings({ persona, onSave, onClose, roleId }: PersonaSettingsProps) {
+    const role: CafeRole = getRoleOrDefault(roleId);
 
-const COMMON_NICE_TO_HAVES = [
-    "Previous barista experience",
-    "Latte art skills",
-    "Customer service experience",
-    "POS/Register experience",
-    "Bilingual",
-    "Management experience",
-];
+    // Populate dealbreakers and nice-to-haves from the role config
+    const roleDealbreakers = role.dealbreakers;
+    const roleNiceToHaves = role.niceToHaveSkills.map(s => s.label.replace(/^. /, ''));
 
-export function PersonaSettings({ persona, onSave, onClose }: PersonaSettingsProps) {
     const [formData, setFormData] = useState<HiringPersona>(persona);
     const [newDealbreaker, setNewDealbreaker] = useState('');
     const [newNiceToHave, setNewNiceToHave] = useState('');
+
+    // Sync form data when role changes
+    useEffect(() => {
+        setFormData(prev => ({
+            ...prev,
+            jobTitle: role.title,
+            wageMin: role.wageRange.min,
+            wageMax: role.wageRange.max,
+            dealbreakers: role.dealbreakers,
+            niceToHaves: roleNiceToHaves,
+        }));
+    }, [role.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const toggleDealbreaker = (item: string) => {
         setFormData(prev => ({
@@ -87,7 +88,7 @@ export function PersonaSettings({ persona, onSave, onClose }: PersonaSettingsPro
             <Card className="bg-white border-stone-200 shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl">
                 <CardHeader className="border-b border-stone-100">
                     <CardTitle className="flex items-center justify-between text-stone-800">
-                        <span>⚙️ Hiring Persona Settings</span>
+                        <span>⚙️ Hiring Persona — {role.emoji} {role.title}</span>
                         <Button variant="ghost" size="sm" onClick={onClose} className="text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-lg">✕</Button>
                     </CardTitle>
                 </CardHeader>
@@ -140,16 +141,16 @@ export function PersonaSettings({ persona, onSave, onClose }: PersonaSettingsPro
                         </div>
                     </div>
 
-                    {/* Dealbreakers */}
+                    {/* Dealbreakers — sourced from role config */}
                     <div className="space-y-3">
                         <h3 className="text-sm font-medium text-stone-500 uppercase tracking-wide">
                             🚫 Dealbreakers (Must-Haves)
                         </h3>
                         <p className="text-xs text-stone-400">
-                            Candidates failing these will be automatically filtered out.
+                            Pre-filled from {role.emoji} {role.title} role. Toggle or add custom ones.
                         </p>
                         <div className="flex flex-wrap gap-2">
-                            {COMMON_DEALBREAKERS.map(item => (
+                            {roleDealbreakers.map(item => (
                                 <Badge
                                     key={item}
                                     variant={formData.dealbreakers.includes(item) ? "default" : "outline"}
@@ -162,6 +163,18 @@ export function PersonaSettings({ persona, onSave, onClose }: PersonaSettingsPro
                                     {formData.dealbreakers.includes(item) ? '✓ ' : ''}{item}
                                 </Badge>
                             ))}
+                            {/* Show any custom dealbreakers the user added */}
+                            {formData.dealbreakers
+                                .filter(d => !roleDealbreakers.includes(d))
+                                .map(item => (
+                                    <Badge
+                                        key={item}
+                                        className="cursor-pointer rounded-lg px-3 py-1 bg-lime-500 text-white hover:bg-lime-600"
+                                        onClick={() => toggleDealbreaker(item)}
+                                    >
+                                        ✓ {item} (custom)
+                                    </Badge>
+                                ))}
                         </div>
                         <div className="flex gap-2">
                             <input
@@ -176,13 +189,13 @@ export function PersonaSettings({ persona, onSave, onClose }: PersonaSettingsPro
                         </div>
                     </div>
 
-                    {/* Nice to Haves */}
+                    {/* Nice to Haves — sourced from role config */}
                     <div className="space-y-3">
                         <h3 className="text-sm font-medium text-stone-500 uppercase tracking-wide">
                             ⭐ Nice-to-Haves (Bonus Points)
                         </h3>
                         <div className="flex flex-wrap gap-2">
-                            {COMMON_NICE_TO_HAVES.map(item => (
+                            {roleNiceToHaves.map(item => (
                                 <Badge
                                     key={item}
                                     variant={formData.niceToHaves.includes(item) ? "default" : "outline"}
@@ -195,6 +208,17 @@ export function PersonaSettings({ persona, onSave, onClose }: PersonaSettingsPro
                                     {formData.niceToHaves.includes(item) ? '✓ ' : ''}{item}
                                 </Badge>
                             ))}
+                            {formData.niceToHaves
+                                .filter(n => !roleNiceToHaves.includes(n))
+                                .map(item => (
+                                    <Badge
+                                        key={item}
+                                        className="cursor-pointer rounded-lg px-3 py-1 bg-amber-400 text-white hover:bg-amber-500"
+                                        onClick={() => toggleNiceToHave(item)}
+                                    >
+                                        ✓ {item} (custom)
+                                    </Badge>
+                                ))}
                         </div>
                         <div className="flex gap-2">
                             <input
