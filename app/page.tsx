@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { ParserOutput } from '@/app/api/types';
 import { getRoleById, CAFE_ROLES } from '@/lib/roles';
 import { demoCandidates } from '@/lib/demo-data';
-import { loadCandidatesFromSupabase, DEMO_MERCHANT_ID, CandidateRow } from '@/lib/supabase';
+import { loadCandidatesFromSupabase, deleteCandidateFromSupabase, DEMO_MERCHANT_ID, CandidateRow } from '@/lib/supabase';
 
 const defaultPersona: HiringPersona = {
   jobTitle: 'Barista',
@@ -130,7 +130,8 @@ export default function Dashboard() {
     }
   }, []);
 
-  const handleRemoveCandidate = useCallback((candidateId: string) => {
+  const handleRemoveCandidate = useCallback(async (candidateId: string) => {
+    await deleteCandidateFromSupabase(candidateId);
     setCandidates(prev => prev.filter(c => c.id !== candidateId));
     setCompareIds(prev => prev.filter(id => id !== candidateId));
   }, []);
