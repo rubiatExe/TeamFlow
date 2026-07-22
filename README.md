@@ -86,14 +86,20 @@ Experience level, relevant skills, certifications, and languages — all collect
           │                │                   │
           ▼                ▼                   ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                      API ROUTES                              │
-│  /api/parser (PDF→JSON)  │  /api/invite (Magic Links)       │
-└─────────────────────────────────────────────────────────────┘
+│                      API ROUTES                             │
+│  /api/parser (Orchestrator) │ /api/invite (Magic Links)     │
+└─────────┬───────────────────────────────────────────────────┘
           │
           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                   GEMINI 1.5 FLASH                          │
-│  • Resume extraction   • Fit scoring   • Skill matching    │
+│             PYTHON OCR MICROSERVICE (Cloud Run)             │
+│  • PyMuPDF/Tesseract extraction                             │
+└─────────┬───────────────────────────────────────────────────┘
+          │
+          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   GEMINI 3.1 PRO (Scorer)                   │
+│  • Structured JSON parsing • Fit scoring • Skill matching   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -104,6 +110,7 @@ Experience level, relevant skills, certifications, and languages — all collect
 ### Prerequisites
 - Node.js 18+
 - Google AI API Key ([Get one free](https://aistudio.google.com/apikey))
+- Supabase Project URL and Anon Key
 
 ### Installation
 
@@ -117,7 +124,7 @@ npm install
 
 # Set up environment variables
 cp .env.example .env.local
-# Add your GOOGLE_AI_API_KEY
+# Add your GOOGLE_AI_API_KEY, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and OCR_SERVICE_URL
 
 # Run the dev server
 npm run dev
@@ -135,9 +142,10 @@ Visit [http://localhost:3000/apply?token=test](http://localhost:3000/apply?token
 | Layer | Technology |
 |-------|------------|
 | **Frontend** | Next.js 15 (App Router), React 19, Tailwind CSS 4 |
-| **AI/ML** | Google Gemini 1.5 Flash |
+| **Microservice** | Python 3 (FastAPI/Flask) deployed on Google Cloud Run |
+| **AI/ML** | Google Gemini (3.1 Pro / 1.5 Flash) |
 | **UI Components** | shadcn/ui, Lucide Icons |
-| **Database** | Supabase (PostgreSQL) + pgvector |
+| **Database** | Supabase (PostgreSQL) |
 | **SMS** | Twilio (for magic links) |
 | **Design** | Scandinavian Warmth design system |
 
@@ -149,10 +157,11 @@ Visit [http://localhost:3000/apply?token=test](http://localhost:3000/apply?token
 - [x] Resume parsing with Gemini
 - [x] AI fit scoring
 - [x] Kanban candidate management
+- [x] Supabase integration for candidate persistence
+- [x] Python OCR pipeline for robust PDF extraction
 - [x] Magic link invites
 - [x] Multi-step candidate portal
 - [ ] Calendar integration for scheduling
-- [ ] Square integration for merchant data
 - [ ] Video/audio "Vibe Check" recording
 - [ ] Bulk SMS campaigns
 

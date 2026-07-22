@@ -45,22 +45,8 @@ interface SquareSettingsProps {
 }
 
 export function SquareSettings({ onJobSelect, selectedJobId }: SquareSettingsProps) {
-    const [isConnected, setIsConnected] = useState(true);
-    const [store] = useState<StoreConfig>(DEMO_STORE);
+    const [store] = useState<StoreConfig>({ ...DEMO_STORE, address: "475 Central Ave, Jersey City, NJ 07307" });
     const [jobs] = useState<SquareJob[]>(DEMO_JOBS);
-    const [syncing, setSyncing] = useState(false);
-
-    const handleSync = async () => {
-        setSyncing(true);
-        // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        setSyncing(false);
-    };
-
-    const handleConnect = () => {
-        // In real implementation, this would redirect to Square OAuth
-        setIsConnected(true);
-    };
 
     // Get dealbreakers for the currently selected role
     const selectedJob = jobs.find(j => j.id === selectedJobId);
@@ -71,66 +57,31 @@ export function SquareSettings({ onJobSelect, selectedJobId }: SquareSettingsPro
             <CardHeader className="pb-4">
                 <div className="flex items-center justify-between">
                     <CardTitle className="text-lg font-semibold text-stone-800 flex items-center gap-2">
-                        <span className="text-2xl">◼️</span>
-                        Square Integration
+                        <span className="text-2xl">📋</span>
+                        Store & Roles
                     </CardTitle>
-                    <Badge
-                        className={`px-3 py-1 rounded-lg text-xs font-medium ${isConnected
-                                ? 'bg-lime-100 text-lime-700'
-                                : 'bg-stone-100 text-stone-500'
-                            }`}
-                    >
-                        {isConnected ? '✓ Connected' : 'Not Connected'}
-                    </Badge>
                 </div>
             </CardHeader>
             <CardContent className="space-y-6">
-                {!isConnected ? (
-                    <div className="text-center py-8">
-                        <div className="text-4xl mb-4">🔗</div>
-                        <h3 className="text-lg font-medium text-stone-700 mb-2">
-                            Connect Your Square Account
-                        </h3>
-                        <p className="text-stone-500 text-sm mb-6">
-                            Sync job roles, wages, and team settings automatically
-                        </p>
-                        <Button
-                            onClick={handleConnect}
-                            className="bg-stone-900 hover:bg-stone-800 text-white px-6 py-2 rounded-xl"
-                        >
-                            Connect with Square
-                        </Button>
+                {/* Store Info */}
+                <div className="flex items-center gap-4 p-4 bg-stone-50 rounded-xl">
+                    <div
+                        className="w-14 h-14 rounded-xl flex items-center justify-center text-3xl"
+                        style={{ backgroundColor: store.primaryColor + '20' }}
+                    >
+                        {store.logo}
                     </div>
-                ) : (
-                    <>
-                        {/* Store Info */}
-                        <div className="flex items-center gap-4 p-4 bg-stone-50 rounded-xl">
-                            <div
-                                className="w-14 h-14 rounded-xl flex items-center justify-center text-3xl"
-                                style={{ backgroundColor: store.primaryColor + '20' }}
-                            >
-                                {store.logo}
-                            </div>
-                            <div className="flex-1">
-                                <h3 className="font-semibold text-stone-800">{store.name}</h3>
-                                <p className="text-sm text-stone-500">{store.address}</p>
-                            </div>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={handleSync}
-                                disabled={syncing}
-                                className="rounded-lg"
-                            >
-                                {syncing ? '⟳ Syncing...' : '⟳ Sync'}
-                            </Button>
-                        </div>
+                    <div className="flex-1">
+                        <h3 className="font-semibold text-stone-800">{store.name}</h3>
+                        <p className="text-sm text-stone-500">{store.address}</p>
+                    </div>
+                </div>
 
-                        {/* Job Roles from Labor API */}
-                        <div>
-                            <h4 className="text-sm font-medium text-stone-600 mb-3">
-                                Active Job Roles (from Square Labor)
-                            </h4>
+                {/* Job Roles */}
+                <div>
+                    <h4 className="text-sm font-medium text-stone-600 mb-3">
+                        Active Job Roles
+                    </h4>
                             <div className="space-y-2">
                                 {jobs.filter(j => j.isActive).map(job => {
                                     const role = getRoleById(job.roleId);
@@ -192,8 +143,6 @@ export function SquareSettings({ onJobSelect, selectedJobId }: SquareSettingsPro
                                 )}
                             </div>
                         </div>
-                    </>
-                )}
             </CardContent>
         </Card>
     );

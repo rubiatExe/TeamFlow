@@ -18,7 +18,7 @@ const defaultPersona: HiringPersona = {
   wageMax: 20,
   dealbreakers: ['Weekend availability required', 'Must be 18+'],
   niceToHaves: ['Previous barista experience', 'Latte art skills'],
-  storeLocation: 'Jersey City, NJ',
+  storeLocation: '475 Central Ave, Jersey City, NJ 07307',
 };
 
 export default function Dashboard() {
@@ -103,12 +103,14 @@ export default function Dashboard() {
     const avgScore = total > 0
       ? Math.round(candidates.reduce((sum, c) => sum + (c.data.score?.total || 0), 0) / total)
       : 0;
-    const topCandidate = candidates.reduce((best, c) =>
-      (c.data.score?.total || 0) > (best.data.score?.total || 0) ? c : best
-    , candidates[0]);
+      
+    const roleCandidates = candidates.filter(c => c.data.candidate.applied_role === selectedRoleId);
+    const topCandidate = roleCandidates.reduce((best, c) =>
+      (c.data.score?.total || 0) > (best?.data?.score?.total || 0) ? c : best
+    , roleCandidates[0]);
 
     return { total, byStatus, avgScore, topCandidate };
-  }, [candidates]);
+  }, [candidates, selectedRoleId]);
 
   const handleFileProcessed = useCallback((result: ParserOutput) => {
     const newCandidate: CandidateWithStatus = {
@@ -330,7 +332,7 @@ export default function Dashboard() {
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowSidebar(false)} />
           <div className="absolute right-0 top-0 bottom-0 w-80 bg-stone-50 p-4 overflow-y-auto shadow-xl">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="font-semibold text-stone-800">Square Settings</h3>
+              <h3 className="font-semibold text-stone-800">Job Settings</h3>
               <button onClick={() => setShowSidebar(false)} className="text-stone-400 hover:text-stone-600">✕</button>
             </div>
             <SquareSettings
@@ -461,7 +463,7 @@ export default function Dashboard() {
                 Welcome to the Team!
               </h2>
               <p className="text-stone-600 mb-6">
-                <strong>{hiredCandidate.data.candidate.name}</strong> has been added to Square Team
+                <strong>{hiredCandidate.data.candidate.name}</strong> has been added to the Team
                 {hiredCandidate.data.candidate.applied_role && (
                   <span className="block text-sm text-stone-400 mt-1">
                     Role: {getRoleById(hiredCandidate.data.candidate.applied_role)?.emoji}{' '}
@@ -489,12 +491,9 @@ export default function Dashboard() {
                 </Button>
                 <Button
                   className="flex-1 bg-lime-500 hover:bg-lime-600 text-white rounded-xl"
-                  onClick={() => {
-                    setShowHiredModal(null);
-                    window.open('https://squareup.com/dashboard/team', '_blank');
-                  }}
+                  onClick={() => setShowHiredModal(null)}
                 >
-                  View in Square →
+                  Done →
                 </Button>
               </div>
             </div>
