@@ -313,7 +313,8 @@ OUTPUT — valid JSON only, no markdown fences:
   recordScorerUsage(usage);
 
   const responseText = result.response.text();
-  const parsed = JSON.parse(responseText);
+  const cleanedText = responseText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  const parsed = JSON.parse(cleanedText);
 
   if (parsed.candidate && !parsed.candidate.applied_role) {
     parsed.candidate.applied_role = role.id;

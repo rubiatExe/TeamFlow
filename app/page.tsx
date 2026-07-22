@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { DropZone } from '@/components/drop-zone';
 import { CandidateBoard, CandidateWithStatus, CandidateStatus } from '@/components/candidate-board';
 import { PersonaSettings, HiringPersona } from '@/components/persona-settings';
@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { ParserOutput } from '@/app/api/types';
 import { getRoleById, CAFE_ROLES } from '@/lib/roles';
 import { demoCandidates } from '@/lib/demo-data';
+import { loadCandidatesFromSupabase, DEMO_MERCHANT_ID, CandidateRow } from '@/lib/supabase';
 
 const defaultPersona: HiringPersona = {
   jobTitle: 'Barista',
@@ -28,6 +29,38 @@ export default function Dashboard() {
   const [selectedRoleId, setSelectedRoleId] = useState<string>('barista');
   const [showHiredModal, setShowHiredModal] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(false);
+
+  useEffect(() => {
+    async function fetchCandidates() {
+      const rows = await loadCandidatesFromSupabase(DEMO_MERCHANT_ID);
+      if (rows && rows.length > 0) {
+        const mapped: CandidateWithStatus[] = rows.map((row: CandidateRow) => ({
+          id: row.id || `candidate_${Date.now()}`,
+          status: (row.status as CandidateStatus) || 'new',
+          data: {
+            candidate: {
+              name: row.name,
+              email: row.email,
+              phone: row.phone,
+              city: row.city,
+              skills: (row.analysis as any)?.skills || [],
+              experience_years: (row.analysis as any)?.experience_years,
+              applied_role: (row.analysis as any)?.applied_role || row.job_id,
+            },
+            score: {
+              total: row.fit_score || 0,
+              breakdown: (row.analysis as any)?.breakdown || { constraints: 0, experience: 0, logistics: 0 },
+              explanation: (row.analysis as any)?.explanation || row.summary,
+            },
+            red_flags: row.red_flags || [],
+          }
+        }));
+        // Prepend fetched real candidates to demo ones
+        setCandidates([...mapped, ...demoCandidates]);
+      }
+    }
+    fetchCandidates();
+  }, []);
 
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
