@@ -149,15 +149,25 @@ function extractAndScoreCandidate(
 
 /**
  * Step 2 of the pipeline — call Agent 2 (Gemini Model) to semantically score candidate against role.
+ * Accepts either a plain markdown string (from Agent 1 OCR) or a raw inline file (PDF/image)
+ * for Gemini's native vision when OCR is unavailable.
  */
 async function callScorerAgent(
   resumeMarkdown: string,
   role: CafeRole,
-  fileName: string = 'Resume.pdf'
+  fileName: string = 'Resume.pdf',
+  inlineFile?: { base64Data: string; mimeType: string }
 ): Promise<ParserOutput> {
   if (!genAI) {
     return extractAndScoreCandidate(resumeMarkdown, fileName, role);
   }
+
+  // Build the prompt — identical whether we got OCR text or are using Gemini vision
+  const resumeSection = inlineFile
+    ? '(See the attached resume document below — extract all details directly from it)'
+    : `═══════════════════════════════════════════════════════
+${resumeMarkdown}
+═══════════════════════════════════════════════════════`;
 
   const prompt = `You are TeamFlow Agent 2 — an expert AI hiring assistant for specialty cafes and restaurants.
 Evaluate the candidate's resume for the position of "${role.title}".
@@ -168,10 +178,8 @@ ROLE CRITERIA TO EVALUATE:
 - Essential Skills: ${JSON.stringify(role.essentialSkills.map(s => s.label))}
 - Nice-To-Have Skills: ${JSON.stringify(role.niceToHaveSkills.map(s => s.label))}
 
-CANDIDATE RESUME TEXT (from Agent 1 OCR):
-═══════════════════════════════════════════════════════
-${resumeMarkdown}
-═══════════════════════════════════════════════════════
+CANDIDATE RESUME ${inlineFile ? '(attached document)' : 'TEXT (from Agent 1 OCR)'}:
+${resumeSection}
 
 EVALUATION INSTRUCTIONS:
 
@@ -216,11 +224,20 @@ OUTPUT — valid JSON only, no markdown fences:
   for (const modelName of modelCandidates) {
     try {
       const model = genAI.getGenerativeModel({ model: modelName });
+
+      // Build parts: if inlineFile provided use Gemini vision, otherwise plain text
+      const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = inlineFile
+        ? [
+            { text: prompt },
+            { inlineData: { data: inlineFile.base64Data, mimeType: inlineFile.mimeType } },
+          ]
+        : [{ text: prompt }];
+
       result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        contents: [{ role: 'user', parts }],
         generationConfig: { responseMimeType: 'application/json' },
       });
-      console.log(`[Pipeline] Agent 2 (Scorer) using model: ${modelName}`);
+      console.log(`[Pipeline] Agent 2 (Scorer) using model: ${modelName}, vision=${!!inlineFile}`);
       break;
     } catch (err: unknown) {
       console.warn(`[Pipeline] Agent 2 model ${modelName} notice:`, (err as Error).message || err);
@@ -228,12 +245,12 @@ OUTPUT — valid JSON only, no markdown fences:
   }
 
   if (!result) {
-    console.warn('[Pipeline] Agent 2 models rate limited or unavailable — performing dynamic role-based evaluation');
+    console.warn('[Pipeline] Agent 2 models unavailable — performing dynamic role-based evaluation');
     return extractAndScoreCandidate(resumeMarkdown, fileName, role);
   }
 
   const usage = result.response.usageMetadata;
-  console.log(`[Pipeline] Agent 2 (Scorer) tokens — input: ${usage?.promptTokenCount || 1200}, output: ${usage?.candidatesTokenCount || 340}`);
+  console.log(`[Pipeline] Agent 2 tokens — input: ${usage?.promptTokenCount || 1200}, output: ${usage?.candidatesTokenCount || 340}`);
 
   const responseText = result.response.text();
   const parsed = JSON.parse(responseText);
@@ -285,29 +302,32 @@ export async function POST(req: NextRequest) {
     // ── No API Key — return dynamic role-based candidate evaluation ─────────
     if (!scorerModel || !apiKey) {
       console.log('[Pipeline] No Gemini API key — performing dynamic role-based candidate evaluation');
-      const fileText = Buffer.from(base64Data, 'base64').toString('utf-8');
-      const dynamicResult = extractAndScoreCandidate(fileText, fileName || 'Resume.pdf', role);
+      // Note: binary PDF bytes are not readable as UTF-8; this is best-effort name extraction from filename
+      const dynamicResult = extractAndScoreCandidate('', fileName || 'Resume.pdf', role);
       return NextResponse.json(dynamicResult);
     }
 
     // ═════════════════════════════════════════════════════════════════════════
     // SEQUENTIAL MULTI-AGENT PIPELINE
-    // Step 1 → Agent 1 (OCR)     — python_service /extract → markdown text
+    // Step 1 → Agent 1 (OCR)     — python_service /extract → markdown text  (local/deployed service)
+    // Step 1b→ Gemini Vision     — direct file input       → (fallback when OCR unavailable)
     // Step 2 → Agent 2 (Scorer)  — Gemini Models           → ParserOutput
     // ═════════════════════════════════════════════════════════════════════════
 
     // ── Step 1: OCR Extraction (Agent 1) ─────────────────────────────────────
-    let resumeMarkdown = await callOcrAgent(base64Data, mimeType, fileName || 'resume.pdf');
+    const resumeMarkdown = await callOcrAgent(base64Data, mimeType, fileName || 'resume.pdf');
 
     const ocrFailed = !resumeMarkdown || resumeMarkdown.trim().length === 0;
-    if (ocrFailed) {
-      console.warn('[Pipeline] OCR Agent unavailable — using dynamic role-based evaluation');
-      const fileText = Buffer.from(base64Data, 'base64').toString('utf-8');
-      resumeMarkdown = fileText;
-    }
 
     // ── Step 2: Semantic Scoring (Agent 2) ───────────────────────────────────
-    const parsedData = await callScorerAgent(resumeMarkdown, role, fileName || 'Resume.pdf');
+    // If OCR failed, pass the raw file to Gemini vision instead of garbage UTF-8 bytes
+    let parsedData: ParserOutput;
+    if (ocrFailed) {
+      console.log('[Pipeline] OCR unavailable — using Gemini vision directly on file');
+      parsedData = await callScorerAgent('', role, fileName || 'Resume.pdf', { base64Data, mimeType });
+    } else {
+      parsedData = await callScorerAgent(resumeMarkdown, role, fileName || 'Resume.pdf');
+    }
 
     // ── Validate and return ───────────────────────────────────────────────────
     const validated = ParserOutputSchema.safeParse(parsedData);
