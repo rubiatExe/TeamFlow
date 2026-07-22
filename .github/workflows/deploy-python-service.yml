@@ -7,12 +7,9 @@ on:
       # Only trigger when the Python service actually changes
       - 'python_service/**'
 
-# ── Permissions — Required for Workload Identity Federation ───────────────────
-# id-token: write enables the OIDC token exchange with Google Cloud.
-# No service account JSON key is stored in GitHub Secrets.
+# ── Permissions ────────────────────────────────────────────────────────────────
 permissions:
   contents: read
-  id-token: write   # ← WIF: allows GitHub Actions to request an OIDC token
 
 jobs:
   deploy:
@@ -23,27 +20,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Step 1: Authenticate to Google Cloud via WIF (no JSON key) ────────────
-      # This action exchanges the GitHub OIDC token for a short-lived Google
-      # access token. No long-lived service account key is ever stored.
-      - name: Authenticate to Google Cloud (Workload Identity Federation)
+      # ── Step 1: Authenticate to Google Cloud via Service Account Key ──────────
+      - name: Authenticate to Google Cloud
         id: auth
         uses: google-github-actions/auth@v2
         with:
-          # WIF_PROVIDER format:
-          #   projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<POOL_ID>/providers/<PROVIDER_ID>
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-          # The service account the WIF provider is allowed to impersonate.
-          # This SA has only the roles it needs: Cloud Run Developer + Artifact Registry Writer.
-          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-
-      # ── Step 2: Configure Docker for Artifact Registry ────────────────────────
+      # ── Step 2: Set up gcloud CLI ─────────────────────────────────────────────
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
-
-      - name: Configure Docker → Artifact Registry
-        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
 
       # ── Step 3: Deploy to Cloud Run (source-based deploy) ────────────────────
       # Cloud Run builds the Docker image from source using Cloud Build.
@@ -57,15 +43,11 @@ jobs:
           source: ./python_service
 
           # ── Runtime Environment Variables ──────────────────────────────────
-          # Secrets are stored in GitHub Secrets (Settings → Secrets → Actions).
-          # GOOGLE_API_KEY and SUPABASE_* are never committed to the repo.
           env_vars: |
             MOCK_MODE=False
             ENVIRONMENT=production
-            OTEL_SERVICE_NAME=teamflow-python-service
-            OTEL_EXPORTER_OTLP_ENDPOINT=https://telemetry.googleapis.com
 
-          # ── Secrets injected at runtime (not baked into the image) ─────────
+          # ── Secrets injected at runtime (from GCP Secret Manager) ─────────
           secrets: |
             GOOGLE_API_KEY=GOOGLE_API_KEY:latest
             SUPABASE_URL=SUPABASE_URL:latest
