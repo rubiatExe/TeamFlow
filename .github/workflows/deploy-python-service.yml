@@ -1,0 +1,76 @@
+name: Deploy Python Service → Cloud Run
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # Only trigger when the Python service actually changes
+      - 'python_service/**'
+
+# ── Permissions — Required for Workload Identity Federation ───────────────────
+# id-token: write enables the OIDC token exchange with Google Cloud.
+# No service account JSON key is stored in GitHub Secrets.
+permissions:
+  contents: read
+  id-token: write   # ← WIF: allows GitHub Actions to request an OIDC token
+
+jobs:
+  deploy:
+    name: Build & Deploy to Cloud Run
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Step 1: Authenticate to Google Cloud via WIF (no JSON key) ────────────
+      # This action exchanges the GitHub OIDC token for a short-lived Google
+      # access token. No long-lived service account key is ever stored.
+      - name: Authenticate to Google Cloud (Workload Identity Federation)
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          # WIF_PROVIDER format:
+          #   projects/<PROJECT_NUMBER>/locations/global/workloadIdentityPools/<POOL_ID>/providers/<PROVIDER_ID>
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+
+          # The service account the WIF provider is allowed to impersonate.
+          # This SA has only the roles it needs: Cloud Run Developer + Artifact Registry Writer.
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      # ── Step 2: Configure Docker for Artifact Registry ────────────────────────
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker → Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      # ── Step 3: Deploy to Cloud Run (source-based deploy) ────────────────────
+      # Cloud Run builds the Docker image from source using Cloud Build.
+      # No local Docker build needed in CI — keeps the workflow fast.
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: teamflow-python-service
+          region: us-central1
+          source: ./python_service
+
+          # ── Runtime Environment Variables ──────────────────────────────────
+          # Secrets are stored in GitHub Secrets (Settings → Secrets → Actions).
+          # GOOGLE_API_KEY and SUPABASE_* are never committed to the repo.
+          env_vars: |
+            MOCK_MODE=False
+            ENVIRONMENT=production
+            OTEL_SERVICE_NAME=teamflow-python-service
+            OTEL_EXPORTER_OTLP_ENDPOINT=https://telemetry.googleapis.com
+
+          # ── Secrets injected at runtime (not baked into the image) ─────────
+          secrets: |
+            GOOGLE_API_KEY=GOOGLE_API_KEY:latest
+            SUPABASE_URL=SUPABASE_URL:latest
+            SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest
+
+      # ── Step 4: Output deployed URL ───────────────────────────────────────────
+      - name: Print deployed URL
+        run: echo "Deployed → ${{ steps.deploy.outputs.url }}"

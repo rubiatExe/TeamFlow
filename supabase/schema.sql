@@ -60,7 +60,16 @@ CREATE TABLE candidates (
     source TEXT DEFAULT 'upload' -- 'upload' or 'scan'
 );
 
--- 4. Audit Log (Compliance)
+-- 4. Applications Table (Candidate Submissions)
+CREATE TABLE IF NOT EXISTS applications (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    candidate_id UUID REFERENCES candidates(id) ON DELETE SET NULL,
+    role_id TEXT NOT NULL,
+    data JSONB NOT NULL,
+    submitted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 5. Audit Log (Compliance)
 CREATE TABLE audit_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -76,22 +85,24 @@ CREATE TABLE audit_logs (
 ALTER TABLE merchants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE candidates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE applications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 
--- Policies (Simple stub for now, assuming auth.uid() == merchant_id later)
--- For development, we might want to allow anon access or key-based access depending on auth setup.
--- We will refine this once Auth is implemented. 
--- For now, create a policy that allows all operations for authenticated users (managers).
+-- Allow public/anon access for candidates (upload, select, update, delete)
+DROP POLICY IF EXISTS "Enable all for users based on merchant_id" ON candidates;
+CREATE POLICY "Allow public all on candidates" ON candidates FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY "Enable all for users based on merchant_id" ON merchants
-    FOR ALL USING (auth.uid() = id);
+-- Allow public/anon access for applications
+DROP POLICY IF EXISTS "Enable insert for public application submission" ON applications;
+CREATE POLICY "Allow public all on applications" ON applications FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY "Enable all for users based on merchant_id" ON jobs
-    FOR ALL USING (auth.uid() = merchant_id);
+-- Allow public/anon access for jobs & merchants & audit_logs
+DROP POLICY IF EXISTS "Enable all for users based on merchant_id" ON jobs;
+CREATE POLICY "Allow public all on jobs" ON jobs FOR ALL USING (true) WITH CHECK (true);
 
-CREATE POLICY "Enable all for users based on merchant_id" ON candidates
-    FOR ALL USING (auth.uid() = merchant_id);
+DROP POLICY IF EXISTS "Enable all for users based on merchant_id" ON merchants;
+CREATE POLICY "Allow public all on merchants" ON merchants FOR ALL USING (true) WITH CHECK (true);
 
--- Storage buckets setup should be done via API/Dashboard, but here is the idea:
--- Bucket: 'resumes'
--- Policy: Authenticated users can upload and read.
+CREATE POLICY "Allow public all on audit_logs" ON audit_logs FOR ALL USING (true) WITH CHECK (true);
+
+

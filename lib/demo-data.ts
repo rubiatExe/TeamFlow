@@ -8,7 +8,7 @@ export const demoCandidates: CandidateWithStatus[] = [
         data: {
             candidate: {
                 name: 'Sarah Chen',
-                email: 'sarah.chen@email.com',
+                email: 'sarah.chen@gmail.com',
                 phone: '(201) 555-0123',
                 city: 'Hoboken, NJ',
                 skills: ['Espresso', 'Latte Art', 'Customer Service', 'POS Systems'],
@@ -29,7 +29,7 @@ export const demoCandidates: CandidateWithStatus[] = [
         data: {
             candidate: {
                 name: 'Marcus Johnson',
-                email: 'marcus.j@email.com',
+                email: 'marcus.j@gmail.com',
                 phone: '(201) 555-0456',
                 city: 'Jersey City, NJ',
                 skills: ['Team Management', 'Scheduling', 'Cash Handling', 'Training'],
@@ -50,7 +50,7 @@ export const demoCandidates: CandidateWithStatus[] = [
         data: {
             candidate: {
                 name: 'Alex Rivera',
-                email: 'alex.r@email.com',
+                email: 'alex.r@gmail.com',
                 phone: '(973) 555-0789',
                 city: 'Newark, NJ',
                 skills: ['Customer Service', 'Cash Handling'],
@@ -71,7 +71,7 @@ export const demoCandidates: CandidateWithStatus[] = [
         data: {
             candidate: {
                 name: 'Emily Park',
-                email: 'emily.park@email.com',
+                email: 'emily.park@gmail.com',
                 phone: '(201) 555-0321',
                 city: 'Jersey City, NJ',
                 skills: ['Knife Skills', 'Food Prep', 'Grill/Flat-top', 'Food Safety'],
@@ -92,7 +92,7 @@ export const demoCandidates: CandidateWithStatus[] = [
         data: {
             candidate: {
                 name: 'James Wilson',
-                email: 'jwilson@email.com',
+                email: 'jwilson@gmail.com',
                 phone: '(201) 555-0654',
                 city: 'Bayonne, NJ',
                 skills: ['Baking from Scratch', 'Recipe Scaling', 'Oven Operation', 'Sourdough'],
@@ -113,7 +113,7 @@ export const demoCandidates: CandidateWithStatus[] = [
         data: {
             candidate: {
                 name: 'Maria Santos',
-                email: 'maria.santos@email.com',
+                email: 'maria.santos@gmail.com',
                 phone: '(201) 555-0987',
                 city: 'Jersey City, NJ',
                 skills: ['Barista', 'Spanish Speaker', 'Opener'],
