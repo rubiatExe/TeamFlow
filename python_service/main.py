@@ -204,8 +204,8 @@ async def extract_resume_text(file: UploadFile = File(...)):
         # ── Record GenAI Semantic Convention metrics ───────────────────────────
         usage = result.usage_metadata
         if usage:
-            prompt_tokens = usage.prompt_token_count or 0
-            output_tokens = usage.response_token_count or 0  # google-genai uses response_token_count
+            prompt_tokens = getattr(usage, "prompt_token_count", 0)
+            output_tokens = getattr(usage, "candidates_token_count", getattr(usage, "response_token_count", 0))
 
             span.set_attribute("gen_ai.usage.input_tokens", prompt_tokens)
             span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
