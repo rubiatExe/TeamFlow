@@ -121,14 +121,6 @@ export default function Dashboard() {
     }
   }, []);
 
-  const toggleCompare = useCallback((candidateId: string) => {
-    setCompareIds(prev =>
-      prev.includes(candidateId)
-        ? prev.filter(id => id !== candidateId)
-        : prev.length < 3 ? [...prev, candidateId] : prev
-    );
-  }, []);
-
   const hiredCandidate = showHiredModal ? candidates.find(c => c.id === showHiredModal) : null;
   const currentRole = getRoleById(selectedRoleId);
   const compareCandidates = compareIds.map(id => candidates.find(c => c.id === id)).filter(Boolean) as CandidateWithStatus[];

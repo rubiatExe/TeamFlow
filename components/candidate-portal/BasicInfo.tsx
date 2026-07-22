@@ -19,6 +19,11 @@ interface BasicInfoProps {
     onNext: () => void;
 }
 
+function isValidResumeFile(file: File) {
+    const validTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png', 'image/heic'];
+    return validTypes.includes(file.type) || file.name.endsWith('.pdf') || file.name.endsWith('.docx') || file.name.endsWith('.doc');
+}
+
 export function BasicInfo({ data, onChange, onNext }: BasicInfoProps) {
     const [dragActive, setDragActive] = useState(false);
 
@@ -39,7 +44,7 @@ export function BasicInfo({ data, onChange, onNext }: BasicInfoProps) {
 
         if (e.dataTransfer.files && e.dataTransfer.files[0]) {
             const file = e.dataTransfer.files[0];
-            if (isValidFile(file)) {
+            if (isValidResumeFile(file)) {
                 onChange({ ...data, resumeFile: file });
             }
         }
@@ -48,16 +53,11 @@ export function BasicInfo({ data, onChange, onNext }: BasicInfoProps) {
     const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
             const file = e.target.files[0];
-            if (isValidFile(file)) {
+            if (isValidResumeFile(file)) {
                 onChange({ ...data, resumeFile: file });
             }
         }
     }, [data, onChange]);
-
-    const isValidFile = (file: File) => {
-        const validTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png', 'image/heic'];
-        return validTypes.includes(file.type) || file.name.endsWith('.pdf') || file.name.endsWith('.docx') || file.name.endsWith('.doc');
-    };
 
     const removeFile = () => {
         onChange({ ...data, resumeFile: null });

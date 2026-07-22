@@ -57,8 +57,55 @@ CREATE TABLE candidates (
     summary TEXT, -- One line summary
     
     -- Metadata
-    source TEXT DEFAULT 'upload' -- 'upload' or 'scan'
+    source TEXT DEFAULT 'upload', -- 'upload' or 'scan'
+
+    -- pgvector: 768-dim embedding of resume text (text-embedding-004)
+    -- Used for semantic candidate search via cosine similarity
+    embedding vector(768)
 );
+
+-- HNSW index for fast approximate nearest-neighbor search (cosine distance)
+CREATE INDEX IF NOT EXISTS candidates_embedding_idx
+  ON candidates
+  USING hnsw (embedding vector_cosine_ops);
+
+-- RPC: semantic similarity search across candidates for a merchant
+CREATE OR REPLACE FUNCTION match_candidates(
+  query_embedding vector(768),
+  match_merchant_id UUID,
+  match_threshold FLOAT DEFAULT 0.5,
+  match_count INT DEFAULT 5
+)
+RETURNS TABLE (
+  id UUID,
+  name TEXT,
+  email TEXT,
+  status TEXT,
+  fit_score INTEGER,
+  summary TEXT,
+  similarity FLOAT
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    c.id,
+    c.name,
+    c.email,
+    c.status,
+    c.fit_score,
+    c.summary,
+    1 - (c.embedding <=> query_embedding) AS similarity
+  FROM candidates c
+  WHERE
+    c.merchant_id = match_merchant_id
+    AND c.embedding IS NOT NULL
+    AND 1 - (c.embedding <=> query_embedding) > match_threshold
+  ORDER BY c.embedding <=> query_embedding
+  LIMIT match_count;
+END;
+$$;
 
 -- 4. Applications Table (Candidate Submissions)
 CREATE TABLE IF NOT EXISTS applications (

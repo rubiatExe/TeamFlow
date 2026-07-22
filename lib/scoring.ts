@@ -4,7 +4,8 @@ import { ParserOutput } from "../app/api/types";
 // This file contains the pure logic for scoring.
 // Currently, Gemini does the heavy lifting, but we can override or re-calculate here if needed.
 
-export function calculateRedFlags(candidate: ParserOutput['candidate']): string[] {
+export function calculateRedFlags(_candidate: ParserOutput['candidate']): string[] {
+    void _candidate;
     const flags: string[] = [];
     // Example logic we could implement:
     // if (candidate.experience_years < 1) flags.push("Low Experience");

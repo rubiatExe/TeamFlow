@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ParserInputSchema, ParserOutput, ParserOutputSchema } from '../types';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getRoleOrDefault, CafeRole } from '@/lib/roles';
+import { saveCandidateToSupabase, DEMO_MERCHANT_ID } from '@/lib/supabase';
 
 /**
  * TeamFlow — Agent 2: Semantic Evaluation Engine
@@ -16,9 +17,78 @@ import { getRoleOrDefault, CafeRole } from '@/lib/roles';
 
 const apiKey = process.env.GOOGLE_API_KEY;
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
-const scorerModel = genAI?.getGenerativeModel({ model: 'gemini-2.0-flash' });
+const SCORER_MODEL = 'gemini-1.5-pro';
 
 const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:8000';
+
+type OcrAgentResult = {
+  markdown: string;
+  embedding: number[] | null;
+};
+
+type GeminiUsageMetadata = {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+};
+
+type ScorerResult = {
+  response: {
+    usageMetadata?: GeminiUsageMetadata;
+    text: () => string;
+  };
+};
+
+type TraceSpan = {
+  setAttribute: (key: string, value: string | number | boolean) => void;
+  recordException: (error: Error) => void;
+  setStatus: (status: { code: number }) => void;
+  end: () => void;
+};
+
+async function withScorerSpan(
+  attributes: Record<string, string | number | boolean>,
+  operation: () => Promise<ScorerResult>
+): Promise<ScorerResult> {
+  const start = Date.now();
+  const moduleName = '@opentelemetry/api';
+  const otel = await import(moduleName).catch(() => null);
+
+  if (!otel) {
+    return operation();
+  }
+
+  const tracer = otel.trace.getTracer('teamflow.semantic_scorer', '1.0.0');
+
+  return tracer.startActiveSpan('score_resume', async (span: TraceSpan) => {
+    try {
+      for (const [key, value] of Object.entries(attributes)) {
+        span.setAttribute(key, value);
+      }
+
+      const result = await operation();
+      const usage = result.response.usageMetadata;
+
+      span.setAttribute('gen_ai.usage.input_tokens', usage?.promptTokenCount ?? 0);
+      span.setAttribute('gen_ai.usage.output_tokens', usage?.candidatesTokenCount ?? 0);
+      span.setAttribute('teamflow.duration_ms', Date.now() - start);
+
+      return result;
+    } catch (error) {
+      span.recordException(error as Error);
+      span.setStatus({ code: otel.SpanStatusCode.ERROR });
+      throw error;
+    } finally {
+      span.end();
+    }
+  });
+}
+
+function recordScorerUsage(usage: GeminiUsageMetadata | undefined) {
+  const inputTokens = usage?.promptTokenCount ?? 0;
+  const outputTokens = usage?.candidatesTokenCount ?? 0;
+
+  console.log(`[Pipeline] Agent 2 tokens — input: ${inputTokens}, output: ${outputTokens}`);
+}
 
 /**
  * Step 1 of the pipeline — call Agent 1 (python_service) to extract text from the document.
@@ -27,7 +97,7 @@ async function callOcrAgent(
   fileData: string,
   mimeType: string,
   fileName: string
-): Promise<string> {
+): Promise<OcrAgentResult> {
   try {
     const binaryData = Buffer.from(fileData, 'base64');
     const formData = new FormData();
@@ -43,12 +113,12 @@ async function callOcrAgent(
       throw new Error(`OCR Agent returned ${response.status}: ${response.statusText}`);
     }
 
-    const result = await response.json() as { markdown: string; mock: boolean };
-    console.log(`[Pipeline] Agent 1 (OCR) complete. Mock=${result.mock}, chars=${result.markdown.length}`);
-    return result.markdown;
+    const result = await response.json() as { markdown: string; embedding: number[] | null; mock: boolean };
+    console.log(`[Pipeline] Agent 1 (OCR) complete. Mock=${result.mock}, chars=${result.markdown.length}, embedding=${result.embedding ? result.embedding.length + '-dim' : 'none'}`);
+    return { markdown: result.markdown, embedding: result.embedding ?? null };
   } catch (err) {
     console.warn('[Pipeline] Agent 1 (OCR) unavailable, falling back to direct file processing:', err);
-    return '';
+    return { markdown: '', embedding: null };
   }
 }
 
@@ -149,23 +219,18 @@ function extractAndScoreCandidate(
 
 /**
  * Step 2 of the pipeline — call Agent 2 (Gemini Model) to semantically score candidate against role.
- * Accepts either a plain markdown string (from Agent 1 OCR) or a raw inline file (PDF/image)
- * for Gemini's native vision when OCR is unavailable.
+ * Accepts only markdown text from Agent 1. Raw files stay inside the OCR layer.
  */
 async function callScorerAgent(
   resumeMarkdown: string,
   role: CafeRole,
-  fileName: string = 'Resume.pdf',
-  inlineFile?: { base64Data: string; mimeType: string }
+  fileName: string = 'Resume.pdf'
 ): Promise<ParserOutput> {
   if (!genAI) {
     return extractAndScoreCandidate(resumeMarkdown, fileName, role);
   }
 
-  // Build the prompt — identical whether we got OCR text or are using Gemini vision
-  const resumeSection = inlineFile
-    ? '(See the attached resume document below — extract all details directly from it)'
-    : `═══════════════════════════════════════════════════════
+  const resumeSection = `═══════════════════════════════════════════════════════
 ${resumeMarkdown}
 ═══════════════════════════════════════════════════════`;
 
@@ -178,7 +243,7 @@ ROLE CRITERIA TO EVALUATE:
 - Essential Skills: ${JSON.stringify(role.essentialSkills.map(s => s.label))}
 - Nice-To-Have Skills: ${JSON.stringify(role.niceToHaveSkills.map(s => s.label))}
 
-CANDIDATE RESUME ${inlineFile ? '(attached document)' : 'TEXT (from Agent 1 OCR)'}:
+CANDIDATE RESUME TEXT (from Agent 1 OCR):
 ${resumeSection}
 
 EVALUATION INSTRUCTIONS:
@@ -216,32 +281,27 @@ OUTPUT — valid JSON only, no markdown fences:
     "explanation": "2-3 sentence explanation referencing specific skills and dealbreakers"
   },
   "red_flags": ["list of concerns, or empty array"]
-}`;
+	}`;
 
-  const modelCandidates = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-pro'];
   let result = null;
 
-  for (const modelName of modelCandidates) {
-    try {
-      const model = genAI.getGenerativeModel({ model: modelName });
-
-      // Build parts: if inlineFile provided use Gemini vision, otherwise plain text
-      const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = inlineFile
-        ? [
-            { text: prompt },
-            { inlineData: { data: inlineFile.base64Data, mimeType: inlineFile.mimeType } },
-          ]
-        : [{ text: prompt }];
-
-      result = await model.generateContent({
-        contents: [{ role: 'user', parts }],
+  try {
+    const model = genAI.getGenerativeModel({ model: SCORER_MODEL });
+    result = await withScorerSpan(
+      {
+        'gen_ai.system': 'google_gemini',
+        'gen_ai.operation.name': 'score_resume',
+        'gen_ai.model.name': SCORER_MODEL,
+        'teamflow.role_id': role.id,
+      },
+      () => model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: { responseMimeType: 'application/json' },
-      });
-      console.log(`[Pipeline] Agent 2 (Scorer) using model: ${modelName}, vision=${!!inlineFile}`);
-      break;
-    } catch (err: unknown) {
-      console.warn(`[Pipeline] Agent 2 model ${modelName} notice:`, (err as Error).message || err);
-    }
+      })
+    );
+    console.log(`[Pipeline] Agent 2 (Scorer) using model: ${SCORER_MODEL}`);
+  } catch (err: unknown) {
+    console.warn(`[Pipeline] Agent 2 model ${SCORER_MODEL} notice:`, (err as Error).message || err);
   }
 
   if (!result) {
@@ -250,7 +310,7 @@ OUTPUT — valid JSON only, no markdown fences:
   }
 
   const usage = result.response.usageMetadata;
-  console.log(`[Pipeline] Agent 2 tokens — input: ${usage?.promptTokenCount || 1200}, output: ${usage?.candidatesTokenCount || 340}`);
+  recordScorerUsage(usage);
 
   const responseText = result.response.text();
   const parsed = JSON.parse(responseText);
@@ -299,34 +359,70 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No file data provided' }, { status: 400 });
     }
 
-    // ── No API Key — return dynamic role-based candidate evaluation ─────────
-    if (!scorerModel || !apiKey) {
-      console.log('[Pipeline] No Gemini API key — performing dynamic role-based candidate evaluation');
-      // Note: binary PDF bytes are not readable as UTF-8; this is best-effort name extraction from filename
+    // ═════════════════════════════════════════════════════════════════════════
+    // SEQUENTIAL MULTI-AGENT PIPELINE
+    // Step 1 → Agent 1 (OCR)     — python_service /extract → markdown text  (local/deployed service)
+    // Step 2 → Agent 2 (Scorer)  — Gemini Pro text scoring → ParserOutput
+    // ═════════════════════════════════════════════════════════════════════════
+
+    // ── Step 1: OCR Extraction (Agent 1) ─────────────────────────────────────
+    const ocrResult = await callOcrAgent(base64Data, mimeType, fileName || 'resume.pdf');
+    const resumeMarkdown = ocrResult.markdown;
+
+    if (ocrResult.embedding) {
+      console.log(`[Pipeline] Agent 1 embedding ready: ${ocrResult.embedding.length}-dim`);
+    }
+
+    // ── Step 2: Semantic Scoring (Agent 2) ───────────────────────────────────
+    if (!resumeMarkdown.trim()) {
+      console.log('[Pipeline] OCR unavailable — performing dynamic role-based evaluation');
       const dynamicResult = extractAndScoreCandidate('', fileName || 'Resume.pdf', role);
       return NextResponse.json(dynamicResult);
     }
 
-    // ═════════════════════════════════════════════════════════════════════════
-    // SEQUENTIAL MULTI-AGENT PIPELINE
-    // Step 1 → Agent 1 (OCR)     — python_service /extract → markdown text  (local/deployed service)
-    // Step 1b→ Gemini Vision     — direct file input       → (fallback when OCR unavailable)
-    // Step 2 → Agent 2 (Scorer)  — Gemini Models           → ParserOutput
-    // ═════════════════════════════════════════════════════════════════════════
+    if (!apiKey) {
+      console.log('[Pipeline] No Gemini API key — performing dynamic role-based candidate evaluation from OCR text');
+      const dynamicResult = extractAndScoreCandidate(resumeMarkdown, fileName || 'Resume.pdf', role);
+      return NextResponse.json(dynamicResult);
+    }
 
-    // ── Step 1: OCR Extraction (Agent 1) ─────────────────────────────────────
-    const resumeMarkdown = await callOcrAgent(base64Data, mimeType, fileName || 'resume.pdf');
+    const parsedData = await callScorerAgent(resumeMarkdown, role, fileName || 'Resume.pdf');
 
-    const ocrFailed = !resumeMarkdown || resumeMarkdown.trim().length === 0;
+    // ── Persist candidate to Supabase (with embedding from Agent 1) ───────────
+    let candidateId: string | null = null;
+    try {
+      candidateId = await saveCandidateToSupabase({
+        merchant_id: DEMO_MERCHANT_ID,
+        name: parsedData.candidate?.name || 'Unknown',
+        email: parsedData.candidate?.email || undefined,
+        phone: parsedData.candidate?.phone || undefined,
+        city: parsedData.candidate?.city || undefined,
+        status: 'new',
+        resume_url: 'uploaded',          // placeholder — real Storage upload would provide this
+        resume_text: resumeMarkdown.slice(0, 50_000),
+        fit_score: parsedData.score?.total,
+        analysis: {
+          breakdown: parsedData.score?.breakdown,
+          explanation: parsedData.score?.explanation,
+          skills: parsedData.candidate?.skills,
+          experience_years: parsedData.candidate?.experience_years,
+          applied_role: parsedData.candidate?.applied_role,
+        },
+        red_flags: parsedData.red_flags || [],
+        summary: parsedData.score?.explanation?.slice(0, 200) || '',
+        source: 'upload',
+        // Embedding from Agent 1 — stored in pgvector vector(768) column
+        embedding: ocrResult.embedding ?? undefined,
+      });
 
-    // ── Step 2: Semantic Scoring (Agent 2) ───────────────────────────────────
-    // If OCR failed, pass the raw file to Gemini vision instead of garbage UTF-8 bytes
-    let parsedData: ParserOutput;
-    if (ocrFailed) {
-      console.log('[Pipeline] OCR unavailable — using Gemini vision directly on file');
-      parsedData = await callScorerAgent('', role, fileName || 'Resume.pdf', { base64Data, mimeType });
-    } else {
-      parsedData = await callScorerAgent(resumeMarkdown, role, fileName || 'Resume.pdf');
+      if (candidateId) {
+        console.log(`[Pipeline] Candidate saved to Supabase: ${candidateId} (embedding: ${ocrResult.embedding ? ocrResult.embedding.length + '-dim' : 'none'})`);
+      } else {
+        console.log('[Pipeline] Supabase not configured — candidate not persisted');
+      }
+    } catch (saveErr) {
+      // Non-fatal: log and continue — the API still returns the parsed result
+      console.warn('[Pipeline] Failed to persist candidate to Supabase:', saveErr);
     }
 
     // ── Validate and return ───────────────────────────────────────────────────
@@ -336,7 +432,7 @@ export async function POST(req: NextRequest) {
     const elapsed = Date.now() - pipelineStart;
     console.log(`[Pipeline] COMPLETE — ${elapsed}ms | candidate: ${finalData.candidate?.name} | score: ${finalData.score?.total}`);
 
-    return NextResponse.json(finalData);
+    return NextResponse.json({ ...finalData, candidateId });
 
   } catch (error) {
     console.error('[Pipeline] Error:', error);

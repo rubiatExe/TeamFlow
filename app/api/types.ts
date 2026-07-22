@@ -80,6 +80,10 @@ export const ParserOutputSchema = z.object({
         explanation: z.string(), // "Why?" tooltip
     }),
     red_flags: z.array(z.string()),
+    // 768-dim pgvector embedding from Agent 1 (text-embedding-004).
+    // Passed through from the OCR response so the frontend can persist it
+    // to the candidates table for semantic search via match_candidates().
+    embedding: z.array(z.number()).length(768).nullable().optional(),
 });
 
 export type ParserOutput = z.infer<typeof ParserOutputSchema>;

@@ -3,6 +3,9 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
+// Fallback merchant ID used when no auth is in place (demo / local dev)
+export const DEMO_MERCHANT_ID = process.env.DEMO_MERCHANT_ID || '00000000-0000-0000-0000-000000000001';
+
 let supabase: SupabaseClient | null = null;
 
 export function getSupabase(): SupabaseClient | null {
@@ -28,11 +31,15 @@ export interface CandidateRow {
     city?: string;
     status: string;
     resume_url: string;
+    resume_text?: string;  // raw markdown text from OCR Agent 1
     fit_score?: number;
     analysis?: Record<string, unknown>;
     red_flags?: string[];
     summary?: string;
     source: string;
+    // pgvector: 768-dim embedding for semantic search (text-embedding-004)
+    // Supabase accepts this as a plain number[] and stores it in the vector(768) column
+    embedding?: number[];
 }
 
 export async function saveCandidateToSupabase(candidate: CandidateRow): Promise<string | null> {

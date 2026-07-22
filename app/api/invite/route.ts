@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateMagicLink } from '@/lib/magic-link';
 import { sendInviteSMS } from '@/lib/twilio';
+import { updateCandidateStatus } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
-        const { candidateId, candidateName, candidatePhone, candidateEmail, jobId, storeName } = body;
+        const { candidateId, candidateName, candidatePhone, jobId, storeName } = body;
 
         if (!candidateId || !candidateName) {
             return NextResponse.json(
@@ -35,8 +36,15 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        // TODO: Update candidate status to 'invited' in Supabase
-        // TODO: Send email if candidateEmail provided
+        // Update candidate status to 'invited' in Supabase
+        if (candidateId) {
+            const updated = await updateCandidateStatus(candidateId, 'invited');
+            if (updated) {
+                console.log(`[Invite] Status updated to 'invited' for candidate ${candidateId}`);
+            } else {
+                console.warn(`[Invite] Could not update status for candidate ${candidateId} (Supabase may not be configured)`);
+            }
+        }
 
         return NextResponse.json({
             success: true,

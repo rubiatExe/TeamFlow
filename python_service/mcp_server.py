@@ -8,14 +8,15 @@ The LLM agent (Gemini with function calling) decides which tools to invoke
 rather than receiving a pre-baked prompt string with all context embedded.
 
 Tools exposed:
-  • get_job_requirements(role_id)       → dealbreakers + skill criteria for a role
-  • get_candidate(candidate_id)         → a candidate's full stored profile
-  • list_candidates(merchant_id)        → all candidates for a merchant
-  • update_fit_score(candidate_id, ...) → write AI score back to candidates table
+  • get_job_requirements(role_id)            → dealbreakers + skill criteria for a role
+  • get_candidate(candidate_id)              → a candidate's full stored profile
+  • list_candidates(merchant_id)             → all candidates for a merchant
+  • update_fit_score(candidate_id, ...)      → write AI score back to candidates table
+  • semantic_search_candidates(query, ...)   → pgvector cosine similarity search
 
 Usage:
   python mcp_server.py          # runs on port 8001
-  
+
 Security:
   Uses SUPABASE_SERVICE_KEY (server-only, never exposed to client).
   All Supabase access is authenticated via the service role key.
@@ -24,6 +25,8 @@ Security:
 import os
 from typing import Any
 
+import google.genai as genai
+from google.genai.types import EmbedContentConfig
 import httpx
 from fastmcp import FastMCP
 from opentelemetry import trace
@@ -34,12 +37,20 @@ from telemetry import setup_telemetry
 setup_telemetry(service_name="teamflow-mcp-server")
 tracer = trace.get_tracer("teamflow.mcp_server", "1.0.0")
 
-# ── Supabase Config ────────────────────────────────────────────────────────────
+# ── Config ─────────────────────────────────────────────────────────────────────
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")  # Server-only service role key
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+
+EMBEDDING_MODEL = "models/text-embedding-004"
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     print("[MCP] WARNING: SUPABASE_URL or SUPABASE_SERVICE_KEY not set — DB tools will return mock data")
+
+# google-genai client (replaces deprecated google-generativeai)
+genai_client: genai.Client | None = None
+if GOOGLE_API_KEY:
+    genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 
 def supabase_headers() -> dict[str, str]:
@@ -72,13 +83,42 @@ async def supabase_patch(table: str, match_col: str, match_val: str, payload: di
         return True
 
 
+async def supabase_rpc(function_name: str, params: dict) -> Any:
+    """Helper: call a Supabase RPC (PostgreSQL function) via the REST API."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return []
+    url = f"{SUPABASE_URL}/rest/v1/rpc/{function_name}"
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(url, headers=supabase_headers(), json=params)
+        resp.raise_for_status()
+        return resp.json()
+
+
+def get_query_embedding(query: str) -> list[float] | None:
+    """Generate a 768-dim query embedding using text-embedding-004."""
+    if not genai_client or not query.strip():
+        return None
+    try:
+        result = genai_client.models.embed_content(
+            model=EMBEDDING_MODEL,
+            contents=query[:4000],
+            config=EmbedContentConfig(task_type="RETRIEVAL_QUERY"),  # QUERY task type for search queries
+        )
+        embedding = result.embeddings[0].values if result.embeddings else None
+        return list(embedding) if embedding else None
+    except Exception as err:
+        print(f"[MCP] Query embedding failed: {err}")
+        return None
+
+
 # ── FastMCP Server ─────────────────────────────────────────────────────────────
 mcp = FastMCP(
     name="TeamFlow Hiring Agent",
     instructions=(
         "You are a hiring assistant for TeamFlow. Use the provided tools to fetch "
         "job requirements and candidate data from the database before making decisions. "
-        "Always call get_job_requirements first to understand the role's criteria."
+        "Always call get_job_requirements first to understand the role's criteria. "
+        "Use semantic_search_candidates to find candidates by skills or experience description."
     ),
 )
 
@@ -238,6 +278,65 @@ async def update_fit_score(
         else:
             span.set_attribute("teamflow.update_success", False)
             return {"error": "Failed to update candidate"}
+
+
+@mcp.tool()
+async def semantic_search_candidates(
+    query: str,
+    merchant_id: str,
+    top_k: int = 5,
+    threshold: float = 0.5,
+) -> list[dict[str, Any]]:
+    """
+    Perform semantic similarity search across candidates using pgvector cosine distance.
+
+    Generates a query embedding using text-embedding-004 and finds candidates
+    whose resume embeddings are most similar. Useful for natural-language queries like
+    "find candidates with latte art experience" or "show me candidates near Jersey City".
+
+    Args:
+        query:       Natural-language description of what you're looking for.
+        merchant_id: Filter results to this merchant's candidates only.
+        top_k:       Maximum number of candidates to return (default: 5).
+        threshold:   Minimum cosine similarity (0–1). Higher = stricter match (default: 0.5).
+
+    Returns a ranked list of candidates with similarity scores.
+    """
+    with tracer.start_as_current_span("mcp.semantic_search_candidates") as span:
+        span.set_attribute("teamflow.query", query[:100])
+        span.set_attribute("teamflow.merchant_id", merchant_id)
+        span.set_attribute("teamflow.top_k", top_k)
+        span.set_attribute("gen_ai.system", "google_gemini")
+        span.set_attribute("gen_ai.operation.name", "text_embedding")
+
+        if not SUPABASE_URL:
+            return [{"id": "mock-id", "name": "Mock Candidate", "similarity": 0.85, "status": "new", "fit_score": 72}]
+
+        # Generate query embedding
+        query_embedding = get_query_embedding(query)
+        if not query_embedding:
+            span.set_attribute("teamflow.embedding_failed", True)
+            return {"error": "Could not generate query embedding — check GOOGLE_API_KEY"}  # type: ignore
+
+        span.set_attribute("teamflow.embedding_dims", len(query_embedding))
+
+        # Call Supabase RPC: match_candidates(query_embedding, match_merchant_id, threshold, count)
+        try:
+            results = await supabase_rpc(
+                function_name="match_candidates",
+                params={
+                    "query_embedding": query_embedding,
+                    "match_merchant_id": merchant_id,
+                    "match_threshold": threshold,
+                    "match_count": top_k,
+                },
+            )
+            span.set_attribute("teamflow.results_count", len(results) if isinstance(results, list) else 0)
+            return results if isinstance(results, list) else []
+        except Exception as err:
+            span.set_attribute("teamflow.rpc_error", str(err))
+            print(f"[MCP] semantic_search_candidates RPC failed: {err}")
+            return {"error": f"Semantic search failed: {err}"}  # type: ignore
 
 
 # ── Entry Point ────────────────────────────────────────────────────────────────

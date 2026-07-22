@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -29,21 +29,16 @@ export function PersonaSettings({ persona, onSave, onClose, roleId }: PersonaSet
     const roleDealbreakers = role.dealbreakers;
     const roleNiceToHaves = role.niceToHaveSkills.map(s => s.label.replace(/^. /, ''));
 
-    const [formData, setFormData] = useState<HiringPersona>(persona);
+    const [formData, setFormData] = useState<HiringPersona>({
+        ...persona,
+        jobTitle: role.title,
+        wageMin: role.wageRange.min,
+        wageMax: role.wageRange.max,
+        dealbreakers: role.dealbreakers,
+        niceToHaves: roleNiceToHaves,
+    });
     const [newDealbreaker, setNewDealbreaker] = useState('');
     const [newNiceToHave, setNewNiceToHave] = useState('');
-
-    // Sync form data when role changes
-    useEffect(() => {
-        setFormData(prev => ({
-            ...prev,
-            jobTitle: role.title,
-            wageMin: role.wageRange.min,
-            wageMax: role.wageRange.max,
-            dealbreakers: role.dealbreakers,
-            niceToHaves: roleNiceToHaves,
-        }));
-    }, [role.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const toggleDealbreaker = (item: string) => {
         setFormData(prev => ({

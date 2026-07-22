@@ -8,7 +8,8 @@ const apiKey = process.env.GOOGLE_API_KEY;
 if (!apiKey) {
     console.warn("GOOGLE_API_KEY is not set in environment variables.");
 }
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+const genAI = apiKey && apiKey !== "MOCK_KEY" ? new GoogleGenerativeAI(apiKey) : null;
+const model = genAI?.getGenerativeModel({ model: "gemini-1.5-pro" });
 
 
 
@@ -19,7 +20,7 @@ export async function parseResumeWithGemini(
 
     const role = getRoleOrDefault(context.roleId);
 
-    if (!apiKey || apiKey === "MOCK_KEY") {
+    if (!model) {
         console.log("Mocking Gemini Response (No API Key provided)");
         // Return a partial mock that matches schemas
         return {

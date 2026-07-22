@@ -17,7 +17,7 @@ const BUCKET_NAME = 'resumes';
  */
 export async function uploadResume(file: File | Blob, path: string): Promise<string | null> {
   try {
-    const { data, error } = await supabase.storage
+    const { error } = await supabase.storage
       .from(BUCKET_NAME)
       .upload(path, file, {
         cacheControl: '3600',
