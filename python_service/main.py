@@ -33,8 +33,9 @@ input_token_counter = meter.create_counter(
 MOCK_MODE = os.getenv("MOCK_MODE", "True").lower() == "true"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
-MODEL_CANDIDATES = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"]
+MODEL_CANDIDATES = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro"]
 vision_model = None
+
 
 
 

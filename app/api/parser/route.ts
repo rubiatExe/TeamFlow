@@ -137,8 +137,9 @@ OUTPUT — valid JSON only, no markdown fences:
   "red_flags": ["list of concerns, or empty array"]
 }`;
 
-  const modelCandidates = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+  const modelCandidates = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-pro'];
   let result = null;
+
 
   let lastErr = null;
 

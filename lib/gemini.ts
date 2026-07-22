@@ -8,7 +8,8 @@ const apiKey = process.env.GOOGLE_API_KEY;
 if (!apiKey) {
     console.warn("GOOGLE_API_KEY is not set in environment variables.");
 }
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+
 
 
 export async function parseResumeWithGemini(
