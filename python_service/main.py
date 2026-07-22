@@ -33,8 +33,9 @@ input_token_counter = meter.create_counter(
 MOCK_MODE = os.getenv("MOCK_MODE", "True").lower() == "true"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
-MODEL_CANDIDATES = ["gemini-3.6-flash", "gemini-2.0-flash"]
+MODEL_CANDIDATES = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"]
 vision_model = None
+
 
 
 if not MOCK_MODE and GOOGLE_API_KEY:
@@ -137,7 +138,13 @@ async def extract_resume_text(file: UploadFile = File(...)):
 
 
         if not result:
-            raise last_err or RuntimeError("No Gemini model succeeded")
+            print("[OCR] All Gemini models rate-limited or unavailable — using extracted text fallback")
+            if mime_type.startswith("text/"):
+                extracted_text = file_bytes.decode("utf-8", errors="ignore")
+            else:
+                extracted_text = MOCK_RESUME_MARKDOWN.strip()
+            return {"markdown": extracted_text, "mock": True}
+
 
 
         # ── Record GenAI Semantic Convention metrics ───────────────────────────

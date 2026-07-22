@@ -137,8 +137,9 @@ OUTPUT — valid JSON only, no markdown fences:
   "red_flags": ["list of concerns, or empty array"]
 }`;
 
-  const modelCandidates = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro'];
+  const modelCandidates = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'];
   let result = null;
+
   let lastErr = null;
 
   for (const modelName of modelCandidates) {
@@ -273,20 +274,32 @@ export async function POST(req: NextRequest) {
       // Normal pipeline path — scorer receives clean markdown
       parsedData = await callScorerAgent(resumeMarkdown, role);
     } else {
-      // Fallback: use Gemini directly with the raw file (single-agent mode)
-      // This keeps the app functional even without the Python service running
-      console.log('[Pipeline] Fallback: single-agent mode with inline PDF');
-      const result = await scorerModel.generateContent({
-        contents: [{
-          role: 'user',
-          parts: [
-            { text: `Analyze this resume for a ${role.title} position and return JSON.` },
-            { inlineData: { mimeType, data: base64Data } },
-          ],
-        }],
-        generationConfig: { responseMimeType: 'application/json' },
-      });
-      parsedData = JSON.parse(result.response.text());
+      console.log('[Pipeline] Fallback: single-agent mode with inline file');
+      const fallbackModels = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+
+      let fallbackRes = null;
+      for (const mName of fallbackModels) {
+        try {
+          const model = genAI.getGenerativeModel({ model: mName });
+          fallbackRes = await model.generateContent({
+            contents: [{
+              role: 'user',
+              parts: [
+                { text: `Analyze this resume for a ${role.title} position and return JSON.` },
+                { inlineData: { mimeType, data: base64Data } },
+              ],
+            }],
+            generationConfig: { responseMimeType: 'application/json' },
+          });
+          break;
+        } catch (e) {
+          console.warn(`[Pipeline] Fallback model ${mName} notice:`, e);
+        }
+      }
+      if (fallbackRes) {
+        parsedData = JSON.parse(fallbackRes.response.text());
+      }
+
     }
 
     if (!parsedData) {
