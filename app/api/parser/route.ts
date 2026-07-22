@@ -4,6 +4,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getRoleOrDefault, CafeRole } from '@/lib/roles';
 import { saveCandidateToSupabase, DEMO_MERCHANT_ID } from '@/lib/supabase';
 
+// Enable long-running API routes (Vercel serverless functions time out by default at 10-15s)
+export const maxDuration = 60;
+
 /**
  * TeamFlow — Agent 2: Semantic Evaluation Engine
  * ------------------------------------------------
