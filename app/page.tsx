@@ -166,9 +166,6 @@ export default function Dashboard() {
           <div className="flex items-center gap-3 md:gap-4">
             <span className="text-2xl md:text-3xl">🌿</span>
             <h1 className="text-xl md:text-2xl font-semibold text-stone-800 tracking-tight">TeamFlow</h1>
-            <Badge className="bg-lime-100 text-lime-700 px-2 py-0.5 text-xs hidden sm:inline-flex">
-              ◼️ Square Connected
-            </Badge>
           </div>
           <div className="flex items-center gap-3 md:gap-6">
             <div className="text-sm md:text-base text-stone-500 hidden sm:block">
