@@ -50,10 +50,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 # Model candidates for OCR (vision) — tried in order until one succeeds
 OCR_MODEL_CANDIDATES = [
-    "gemini-2.0-flash",
-    "gemini-1.5-pro",       # Explicitly listed — Gemini 1.5 Pro as fallback
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
+    "gemini-3.1-pro",
 ]
 
 # Embedding model — text-embedding-004 produces 768-dimensional vectors

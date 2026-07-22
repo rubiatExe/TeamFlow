@@ -17,7 +17,7 @@ import { saveCandidateToSupabase, DEMO_MERCHANT_ID } from '@/lib/supabase';
 
 const apiKey = process.env.GOOGLE_API_KEY;
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
-const SCORER_MODEL = 'gemini-1.5-pro';
+const SCORER_MODEL = 'gemini-3.1-pro';
 
 const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:8000';
 
