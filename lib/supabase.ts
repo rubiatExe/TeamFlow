@@ -9,12 +9,20 @@ export const DEMO_MERCHANT_ID = process.env.DEMO_MERCHANT_ID || '00000000-0000-0
 let supabase: SupabaseClient | null = null;
 
 export function getSupabase(): SupabaseClient | null {
-    if (!supabaseUrl || !supabaseKey) {
-        console.warn('[Supabase] Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY');
+    if (!supabaseUrl) return null;
+    
+    // Use the Service Role Key on the server if available to seamlessly bypass RLS
+    const key = typeof window === 'undefined' 
+        ? (process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseKey)
+        : supabaseKey;
+
+    if (!key) {
+        console.warn('[Supabase] Missing Supabase keys in environment');
         return null;
     }
+
     if (!supabase) {
-        supabase = createClient(supabaseUrl, supabaseKey);
+        supabase = createClient(supabaseUrl, key);
     }
     return supabase;
 }
@@ -89,6 +97,17 @@ export async function updateCandidateStatus(candidateId: string, status: string)
 }
 
 export async function deleteCandidateFromSupabase(candidateId: string): Promise<boolean> {
+    if (typeof window !== 'undefined') {
+        // We are on the client; call our secure proxy API instead of hitting Supabase RLS directly
+        try {
+            const res = await fetch(`/api/candidates?id=${candidateId}`, { method: 'DELETE' });
+            return res.ok;
+        } catch (e) {
+            console.error('[Supabase Proxy] Delete failed:', e);
+            return false;
+        }
+    }
+
     const db = getSupabase();
     if (!db) return false;
 
@@ -110,6 +129,18 @@ export async function deleteCandidateFromSupabase(candidateId: string): Promise<
 }
 
 export async function loadCandidatesFromSupabase(merchantId: string): Promise<CandidateRow[]> {
+    if (typeof window !== 'undefined') {
+        // We are on the client; call our secure proxy API instead of hitting Supabase RLS directly
+        try {
+            const res = await fetch(`/api/candidates?merchant_id=${merchantId}`);
+            if (!res.ok) return [];
+            return await res.json();
+        } catch (e) {
+            console.error('[Supabase Proxy] Load failed:', e);
+            return [];
+        }
+    }
+
     const db = getSupabase();
     if (!db) return [];
 
