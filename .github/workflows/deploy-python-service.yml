@@ -48,7 +48,6 @@ jobs:
           env_vars: |
             MOCK_MODE=False
             ENVIRONMENT=production
-            OTEL_EXPORTER_OTLP_ENDPOINT=https://telemetry.googleapis.com
             OTEL_SERVICE_NAME=teamflow-python-service
 
           # ── Secrets injected at runtime (from GCP Secret Manager) ─────────
