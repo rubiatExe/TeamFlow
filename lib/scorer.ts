@@ -267,8 +267,25 @@ OUTPUT — valid JSON only, no markdown fences:
   recordScorerUsage(usage);
 
   const responseText = result.response.text();
-  const cleanedText = responseText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-  const parsed = JSON.parse(cleanedText);
+  let cleanedText = responseText.trim();
+  const match = cleanedText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (match) {
+    cleanedText = match[1].trim();
+  } else {
+    const firstBrace = cleanedText.indexOf('{');
+    const lastBrace = cleanedText.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      cleanedText = cleanedText.slice(firstBrace, lastBrace + 1);
+    }
+  }
+  
+  let parsed;
+  try {
+    parsed = JSON.parse(cleanedText);
+  } catch (e) {
+    console.error('[Pipeline] JSON Parse Error. Raw response:', responseText);
+    throw e;
+  }
 
   if (parsed.candidate && !parsed.candidate.applied_role) {
     parsed.candidate.applied_role = role.id;
