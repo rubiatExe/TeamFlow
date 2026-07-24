@@ -42,7 +42,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
-EMBEDDING_MODEL = "models/text-embedding-004"
+EMBEDDING_MODEL = "models/gemini-embedding-001"
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     print("[MCP] WARNING: SUPABASE_URL or SUPABASE_SERVICE_KEY not set — DB tools will return mock data")
@@ -102,7 +102,10 @@ def get_query_embedding(query: str) -> list[float] | None:
         result = genai_client.models.embed_content(
             model=EMBEDDING_MODEL,
             contents=query[:4000],
-            config=EmbedContentConfig(task_type="RETRIEVAL_QUERY"),  # QUERY task type for search queries
+            config=EmbedContentConfig(
+                task_type="RETRIEVAL_QUERY",  # QUERY task type for search queries
+                output_dimensionality=768
+            ),
         )
         embedding = result.embeddings[0].values if result.embeddings else None
         return list(embedding) if embedding else None

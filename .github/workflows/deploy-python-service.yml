@@ -54,8 +54,6 @@ jobs:
           # ── Secrets injected at runtime (from GCP Secret Manager) ─────────
           secrets: |
             GOOGLE_API_KEY=GOOGLE_API_KEY:latest
-            SUPABASE_URL=SUPABASE_URL:latest
-            SUPABASE_SERVICE_KEY=SUPABASE_SERVICE_KEY:latest
 
       # ── Step 4: Output deployed URL ───────────────────────────────────────────
       - name: Print deployed URL

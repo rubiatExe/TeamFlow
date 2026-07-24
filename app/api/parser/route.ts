@@ -29,7 +29,7 @@ type OcrAgentResult = {
   embedding: number[] | null;
 };
 
-import { callScorerAgent } from '@/lib/scorer';
+import { callScorerAgent, extractAndScoreCandidate } from '@/lib/scorer';
 
 // ── Pipeline Entry Point ──────────────────────────────────────────────────────
 
@@ -146,5 +146,36 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('[Pipeline] Error:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+async function callOcrAgent(base64Data: string, mimeType: string, fileName: string): Promise<OcrAgentResult> {
+  const formData = new FormData();
+  const buffer = Buffer.from(base64Data, 'base64');
+  const blob = new Blob([buffer], { type: mimeType });
+  formData.append('file', blob, fileName);
+
+  try {
+    const response = await fetch(`${OCR_SERVICE_URL}/extract`, {
+      method: 'POST',
+      headers: {
+        'X-OCR-Token': process.env.OCR_SERVICE_TOKEN || '',
+      },
+      body: formData,
+    });
+    
+    if (!response.ok) {
+      console.warn(`[OCR] Service returned status: ${response.status}`);
+      return { markdown: '', embedding: null };
+    }
+    
+    const data = await response.json();
+    return {
+      markdown: data.markdown || '',
+      embedding: data.embedding || null,
+    };
+  } catch (error) {
+    console.error('[OCR] Failed to call OCR service:', error);
+    return { markdown: '', embedding: null };
   }
 }

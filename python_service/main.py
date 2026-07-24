@@ -21,7 +21,8 @@ import os
 
 import google.genai as genai
 from google.genai.types import EmbedContentConfig
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, Header, HTTPException
+import secrets
 from opentelemetry import metrics, trace
 
 from telemetry import setup_telemetry
@@ -47,14 +48,15 @@ ocr_duration = meter.create_histogram(
 # ── Config ─────────────────────────────────────────────────────────────────────
 MOCK_MODE = os.getenv("MOCK_MODE", "True").lower() == "true"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+OCR_SERVICE_TOKEN = os.getenv("OCR_SERVICE_TOKEN", "")
 
 # Model candidates for OCR (vision) — tried in order until one succeeds
 OCR_MODEL_CANDIDATES = [
     "gemini-3.1-pro-preview",
 ]
 
-# Embedding model — text-embedding-004 produces 768-dimensional vectors
-EMBEDDING_MODEL = "models/text-embedding-004"
+# Embedding model — gemini-embedding-001 produces 768-dimensional vectors
+EMBEDDING_MODEL = "models/gemini-embedding-001"
 
 # google-genai client (replaces deprecated google-generativeai)
 genai_client: genai.Client | None = None
@@ -98,7 +100,10 @@ def generate_embedding(text: str) -> list[float] | None:
         result = genai_client.models.embed_content(
             model=EMBEDDING_MODEL,
             contents=text[:8000],  # Truncate to avoid token limits
-            config=EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
+            config=EmbedContentConfig(
+                task_type="RETRIEVAL_DOCUMENT",
+                output_dimensionality=768
+            ),
         )
         embedding = result.embeddings[0].values if result.embeddings else []
         return list(embedding) if len(embedding) == 768 else None
@@ -120,7 +125,15 @@ def health_check():
 
 
 @app.post("/extract")
-async def extract_resume_text(file: UploadFile = File(...)):
+async def extract_resume_text(
+    file: UploadFile = File(...),
+    x_ocr_token: str | None = Header(default=None),
+):
+    if not OCR_SERVICE_TOKEN or not secrets.compare_digest(
+        x_ocr_token or "",
+        OCR_SERVICE_TOKEN,
+    ):
+        raise HTTPException(status_code=401, detail="Unauthorized")
     """
     Agent 1 — OCR Extraction Layer.
 
