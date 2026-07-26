@@ -4,8 +4,8 @@
 
 TeamFlow transforms the hourly hiring process with AI-powered resume parsing, intelligent candidate scoring, and a frictionless application experience. Built for busy hiring managers who need to make fast, informed decisions.
 
-[![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org/)
-[![Gemini](https://img.shields.io/badge/Gemini-1.5%20Flash-blue?logo=google)](https://ai.google.dev/)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
+[![Gemini](https://img.shields.io/badge/Gemini-3.1%20Pro-blue?logo=google)](https://ai.google.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.0-38B2AC?logo=tailwind-css)](https://tailwindcss.com/)
 
@@ -26,7 +26,7 @@ TeamFlow uses AI to solve this:
 | Feature | How It Helps |
 |---------|-------------|
 | 🧠 **Smart Resume Parsing** | Drop a PDF, get structured data + fit score in seconds |
-| 📊 **AI Fit Scoring** | Gemini 1.5 Flash analyzes match to job requirements |
+| 📊 **AI Fit Scoring** | Gemini analyzes each candidate against role-specific requirements |
 | 📱 **Magic Link Invites** | One-click candidate invites via SMS — no login needed |
 | 📋 **Rich Candidate Profiles** | Availability, skills, motivation — all in one place |
 | 🎯 **Hiring Personas** | Define dealbreakers once, auto-filter forever |
@@ -50,11 +50,6 @@ Define job requirements, dealbreakers, and nice-to-haves. The AI uses this to sc
 ---
 
 ### Candidate Experience
-
-#### Welcome Screen
-Candidates receive a magic link (SMS/QR code) — no account needed. Personalized with the store's name.
-
-![Candidate Welcome](docs/screenshots/candidate-welcome.png)
 
 #### Knockout Questions
 Quick yes/no questions filter for dealbreakers (age, work authorization, availability).
@@ -103,12 +98,27 @@ Experience level, relevant skills, certifications, and languages — all collect
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### Repository Tour
+
+| Area | Where to Start |
+|---|---|
+| Manager dashboard | `app/page.tsx` and `components/candidates/` |
+| Candidate application | `app/apply/page.tsx` and `components/candidate-application/` |
+| API orchestration | `app/api/` |
+| AI scoring | `lib/ai/` |
+| Supabase access | `lib/db/` and `supabase/` |
+| External integrations | `lib/integrations/` |
+| Cloud Run service | `services/document-processor/` |
+| CI/CD and WIF | `.github/workflows/` |
+
+For the full runtime flow and integration contracts, see [`docs/architecture.md`](docs/architecture.md). For a guided walkthrough, see [`docs/demo-guide.md`](docs/demo-guide.md).
+
 ---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js 18+
+- Node.js 22+
 - Google AI API Key ([Get one free](https://aistudio.google.com/apikey))
 - Supabase Project URL and Anon Key
 
@@ -124,7 +134,7 @@ npm install
 
 # Set up environment variables
 cp .env.example .env.local
-# Add your GOOGLE_AI_API_KEY, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and OCR_SERVICE_URL
+# Add your GOOGLE_API_KEY, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and OCR_SERVICE_URL
 
 # Run the dev server
 npm run dev
@@ -135,15 +145,40 @@ Open [http://localhost:3000](http://localhost:3000) — you're ready to hire!
 ### Test the Candidate Portal
 Visit [http://localhost:3000/apply?token=test](http://localhost:3000/apply?token=test) to see the candidate experience.
 
+### Verification
+
+```bash
+npm run typecheck
+npm run lint
+npm test
+npm run verify:contracts
+npm run build
+```
+
+`verify:contracts` protects the WIF, Cloud Run, OCR, and Supabase connection points from accidental path or configuration drift.
+
+The scorer treats Gemini output as untrusted input: responses must satisfy a
+structured-output schema and Zod validation, malformed output receives one
+bounded retry, and a conservative deterministic fallback prevents a model
+formatting error from failing the upload.
+
+The implementation story, tradeoffs, and lessons learned are captured in
+[journal.md](./journal.md) as an interview-ready development narrative.
+
+For an optional end-to-end local trace that joins Next.js, Cloud Run, OCR,
+embedding, scoring, and persistence in Google Cloud Trace, follow
+[`ops/observability/README.md`](ops/observability/README.md). Trace export is
+disabled by default.
+
 ---
 
 ## 🛠️ Tech Stack
 
 | Layer | Technology |
 |-------|------------|
-| **Frontend** | Next.js 15 (App Router), React 19, Tailwind CSS 4 |
-| **Microservice** | Python 3 (FastAPI/Flask) deployed on Google Cloud Run |
-| **AI/ML** | Google Gemini (3.1 Pro / 1.5 Flash) |
+| **Frontend** | Next.js 16 (App Router), React 19, Tailwind CSS 4 |
+| **Microservice** | Python 3 with FastAPI, deployed on Google Cloud Run |
+| **AI/ML** | Google Gemini for OCR, embeddings, and candidate scoring |
 | **UI Components** | shadcn/ui, Lucide Icons |
 | **Database** | Supabase (PostgreSQL) |
 | **SMS** | Twilio (for magic links) |
@@ -172,4 +207,3 @@ Visit [http://localhost:3000/apply?token=test](http://localhost:3000/apply?token
 MIT © 2024
 
 ---
-

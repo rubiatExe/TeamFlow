@@ -1,0 +1,16 @@
+services:
+  otel-collector:
+    image: us-docker.pkg.dev/cloud-ops-agents-artifacts/google-cloud-opentelemetry-collector/otelcol-google:0.156.0
+    command:
+      - --config=/etc/otelcol-google/config.yaml
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /var/run/google/adc.json
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT}
+    ports:
+      - 127.0.0.1:4317:4317
+      - 127.0.0.1:4318:4318
+      - 127.0.0.1:13133:13133
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol-google/config.yaml:ro
+      - ${GOOGLE_APPLICATION_CREDENTIALS:?Set GOOGLE_APPLICATION_CREDENTIALS}:/var/run/google/adc.json:ro
+    restart: unless-stopped

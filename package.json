@@ -1,17 +1,22 @@
 {
   "name": "teamflow",
   "version": "0.1.0",
+  "type": "module",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types tests/unit/*.test.ts",
+    "verify:contracts": "node scripts/verify-integration-contracts.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "@opentelemetry/api": "^1.9.1",
     "@supabase/supabase-js": "^2.94.1",
+    "@vercel/otel": "^2.1.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "jsonwebtoken": "^9.0.3",

@@ -1,0 +1,49 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 65
+    spike_limit_percentage: 20
+  transform/set_project_id:
+    error_mode: ignore
+    trace_statements:
+      - set(resource.attributes["gcp.project_id"], resource.attributes["gcp.project.id"]) where resource.attributes["gcp.project.id"] != nil
+      - set(resource.attributes["gcp.project_id"], resource.attributes["cloud.account.id"]) where resource.attributes["gcp.project_id"] == nil and resource.attributes["cloud.account.id"] != nil
+  batch:
+    send_batch_size: 200
+    send_batch_max_size: 200
+    timeout: 5s
+
+exporters:
+  otlp:
+    endpoint: telemetry.googleapis.com:443
+    compression: none
+    auth:
+      authenticator: googleclientauth
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  googleclientauth:
+
+service:
+  extensions:
+    - health_check
+    - googleclientauth
+  pipelines:
+    traces:
+      receivers:
+        - otlp
+      processors:
+        - memory_limiter
+        - transform/set_project_id
+        - batch
+      exporters:
+        - otlp

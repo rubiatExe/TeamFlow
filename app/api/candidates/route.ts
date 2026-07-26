@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { loadCandidatesFromSupabase, deleteCandidateFromSupabase } from '@/lib/supabase';
+import { loadCandidatesFromSupabase, deleteCandidateFromSupabase } from '@/lib/db/supabase';
 
 // This API route proxies Supabase requests from the client securely.
-// Because it runs on the server, `getSupabase()` in `lib/supabase.ts` will use 
+// Because it runs on the server, `getSupabase()` in `lib/db/supabase.ts` will use
 // the `SUPABASE_SERVICE_ROLE_KEY` and bypass any Row Level Security (RLS) restrictions!
 
 export async function GET(req: Request) {

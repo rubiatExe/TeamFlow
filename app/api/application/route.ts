@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { saveApplicationToSupabase, saveCandidateToSupabase, ApplicationSubmission, CandidateRow, DEMO_MERCHANT_ID } from '@/lib/supabase';
-import { callScorerAgent } from '@/lib/scorer';
-import { getRoleOrDefault } from '@/lib/roles';
+import { saveApplicationToSupabase, saveCandidateToSupabase, ApplicationSubmission, CandidateRow, DEMO_MERCHANT_ID } from '@/lib/db/supabase';
+import { callScorerAgent } from '@/lib/ai/scorer';
+import { getRoleOrDefault } from '@/lib/domain/roles';
 
 // Serverless function max duration for Gemini inference
 export const maxDuration = 60;

@@ -5,7 +5,8 @@ on:
     branches: [main]
     paths:
       # Only trigger when the Python service actually changes
-      - 'python_service/**'
+      - 'services/document-processor/**'
+      - '.github/workflows/deploy-python-service.yml'
 
 # ── Permissions ────────────────────────────────────────────────────────────────
 permissions:
@@ -42,13 +43,16 @@ jobs:
         with:
           service: teamflow-python-service
           region: us-central1
-          source: ./python_service
+          source: ./services/document-processor
 
           # ── Runtime Environment Variables ──────────────────────────────────
           env_vars: |
             MOCK_MODE=False
             ENVIRONMENT=production
             OTEL_SERVICE_NAME=teamflow-python-service
+            OTEL_PROPAGATORS=tracecontext,baggage
+            OTEL_TRACES_SAMPLER=parentbased_traceidratio
+            OTEL_TRACES_SAMPLER_ARG=0.1
 
           # ── Secrets injected at runtime (from GCP Secret Manager) ─────────
           secrets: |

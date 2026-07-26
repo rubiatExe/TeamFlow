@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { CAFE_ROLES } from '@/lib/roles';
+import { CAFE_ROLES } from '@/lib/domain/roles';
 
 // Square Labor API simulation — now sourced from centralized role config
 // In production, this would call Square's Team & Labor APIs

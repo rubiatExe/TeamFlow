@@ -23,6 +23,8 @@
 # misc
 .DS_Store
 *.pem
+application_default_credentials.json
+/ops/observability/credentials/
 
 # debug
 npm-debug.log*
@@ -30,8 +32,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files (the documented template is safe to commit)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -42,8 +45,7 @@ next-env.d.ts
 
 # python
 venv/
-python_service/venv/
+**/.venv/
 __pycache__/
 *.pyc
-python_service/sample-resume.*
-
+services/document-processor/sample-resume.*

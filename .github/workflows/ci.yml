@@ -17,17 +17,23 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
       - name: TypeScript — type check
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: ESLint
         run: npm run lint
+
+      - name: Integration contract checks
+        run: npm run verify:contracts
+
+      - name: Unit tests
+        run: npm test
 
   # ── Python: Ruff linter ───────────────────────────────────────────────────────
   python-checks:
@@ -45,7 +51,10 @@ jobs:
           cache: pip
 
       - name: Install Ruff
-        run: pip install ruff
+        run: pip install ruff -r services/document-processor/requirements-dev.txt
 
-      - name: Ruff — lint python_service
-        run: ruff check python_service/
+      - name: Ruff — lint document processor
+        run: ruff check services/document-processor/ scripts/verify-models.py
+
+      - name: Document processor tests
+        run: pytest services/document-processor/tests

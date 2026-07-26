@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ParserInputSchema, ParserOutput, ParserOutputSchema } from '../types';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { getRoleOrDefault, CafeRole } from '@/lib/roles';
-import { saveCandidateToSupabase, DEMO_MERCHANT_ID } from '@/lib/supabase';
+import { ParserInputSchema, ParserOutputSchema } from '@/lib/contracts/parser';
+import { getRoleOrDefault } from '@/lib/domain/roles';
+import { saveCandidateToSupabase, DEMO_MERCHANT_ID } from '@/lib/db/supabase';
+import { createOcrFetchOptions } from '@/lib/observability/ocr-fetch';
+import {
+  getActiveTraceFields,
+  withTraceSpan,
+} from '@/lib/observability/tracing';
 
 // Enable long-running API routes (Vercel serverless functions time out by default at 10-15s)
 export const maxDuration = 60;
@@ -12,29 +16,27 @@ export const maxDuration = 60;
  * ------------------------------------------------
  * This route is the SECOND stage of the Sequential Multi-Agent Pipeline:
  *
- *   [Agent 1: OCR Extractor]  →  python_service /extract  →  raw markdown text
+ *   [Agent 1: OCR Extractor]  →  document processor /extract  →  raw markdown text
  *   [Agent 2: Scorer — THIS]  →  Gemini Models            →  ParserOutput (score, skills, flags)
  *
  * Agent 2 receives clean text from Agent 1, evaluating candidates against role criteria.
  */
 
-const apiKey = process.env.GOOGLE_API_KEY;
-const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
-const SCORER_MODEL = 'gemini-3.1-pro-preview';
-
 const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:8000';
+const hasGeminiApiKey = Boolean(process.env.GOOGLE_API_KEY);
 
 type OcrAgentResult = {
   markdown: string;
   embedding: number[] | null;
 };
 
-import { callScorerAgent, extractAndScoreCandidate } from '@/lib/scorer';
+import { callScorerAgent, extractAndScoreCandidate } from '@/lib/ai/scorer';
 
 // ── Pipeline Entry Point ──────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   const pipelineStart = Date.now();
+  const requestId = crypto.randomUUID();
 
   try {
     const body = await req.json();
@@ -48,7 +50,12 @@ export async function POST(req: NextRequest) {
     const { fileUrl, fileData, mimeType: inputMimeType, fileName, roleId } = validation.data;
     const role = getRoleOrDefault(roleId);
 
-    console.log(`[Pipeline] START — file: ${fileName || fileUrl || 'unknown'}, role: ${role.title}`);
+    console.log('[Pipeline] started', {
+      requestId,
+      roleId: role.id,
+      inputType: fileData ? 'inline' : 'url',
+      ...getActiveTraceFields(),
+    });
 
     // ── Resolve file data ────────────────────────────────────────────────────
     let base64Data: string;
@@ -70,7 +77,7 @@ export async function POST(req: NextRequest) {
 
     // ═════════════════════════════════════════════════════════════════════════
     // SEQUENTIAL MULTI-AGENT PIPELINE
-    // Step 1 → Agent 1 (OCR)     — python_service /extract → markdown text  (local/deployed service)
+    // Step 1 → Agent 1 (OCR)     — document processor /extract → markdown text
     // Step 2 → Agent 2 (Scorer)  — Gemini Pro text scoring → ParserOutput
     // ═════════════════════════════════════════════════════════════════════════
 
@@ -85,67 +92,108 @@ export async function POST(req: NextRequest) {
     // ── Step 2: Semantic Scoring (Agent 2) ───────────────────────────────────
     if (!resumeMarkdown.trim()) {
       console.log('[Pipeline] OCR unavailable — performing dynamic role-based evaluation');
-      const dynamicResult = extractAndScoreCandidate('', fileName || 'Resume.pdf', role);
-      return NextResponse.json(dynamicResult);
+      const dynamicResult = ParserOutputSchema.parse(
+        extractAndScoreCandidate('', fileName || 'Resume.pdf', role),
+      );
+      return NextResponse.json({ ...dynamicResult, requestId });
     }
 
-    if (!apiKey) {
+    if (!hasGeminiApiKey) {
       console.log('[Pipeline] No Gemini API key — performing dynamic role-based candidate evaluation from OCR text');
-      const dynamicResult = extractAndScoreCandidate(resumeMarkdown, fileName || 'Resume.pdf', role);
-      return NextResponse.json(dynamicResult);
+      const dynamicResult = ParserOutputSchema.parse(
+        extractAndScoreCandidate(
+          resumeMarkdown,
+          fileName || 'Resume.pdf',
+          role,
+        ),
+      );
+      return NextResponse.json({ ...dynamicResult, requestId });
     }
 
-    const parsedData = await callScorerAgent(resumeMarkdown, role, fileName || 'Resume.pdf');
+    const parsedData = ParserOutputSchema.parse(
+      await callScorerAgent(
+        resumeMarkdown,
+        role,
+        fileName || 'Resume.pdf',
+        false,
+        requestId,
+      ),
+    );
 
     // ── Persist candidate to Supabase (with embedding from Agent 1) ───────────
     let candidateId: string | null = null;
     try {
-      candidateId = await saveCandidateToSupabase({
-        merchant_id: DEMO_MERCHANT_ID,
-        name: parsedData.candidate?.name || 'Unknown',
-        email: parsedData.candidate?.email || undefined,
-        phone: parsedData.candidate?.phone || undefined,
-        city: parsedData.candidate?.city || undefined,
-        status: 'new',
-        resume_url: 'uploaded',          // placeholder — real Storage upload would provide this
-        resume_text: resumeMarkdown.slice(0, 50_000),
-        fit_score: parsedData.score?.total,
-        analysis: {
-          breakdown: parsedData.score?.breakdown,
-          explanation: parsedData.score?.explanation,
-          skills: parsedData.candidate?.skills,
-          experience_years: parsedData.candidate?.experience_years,
-          applied_role: parsedData.candidate?.applied_role,
+      candidateId = await withTraceSpan(
+        'supabase.persist_candidate',
+        {
+          'teamflow.pipeline.stage': 'persistence',
+          'db.system.name': 'postgresql',
         },
-        red_flags: parsedData.red_flags || [],
-        summary: parsedData.score?.explanation?.slice(0, 200) || '',
-        source: 'upload',
-        // Embedding from Agent 1 — stored in pgvector vector(768) column
-        embedding: ocrResult.embedding ?? undefined,
-      });
+        () =>
+          saveCandidateToSupabase({
+            merchant_id: DEMO_MERCHANT_ID,
+            name: parsedData.candidate?.name || 'Unknown',
+            email: parsedData.candidate?.email || undefined,
+            phone: parsedData.candidate?.phone || undefined,
+            city: parsedData.candidate?.city || undefined,
+            status: 'new',
+            resume_url: 'uploaded',          // placeholder — real Storage upload would provide this
+            resume_text: resumeMarkdown.slice(0, 50_000),
+            fit_score: parsedData.score?.total,
+            analysis: {
+              breakdown: parsedData.score?.breakdown,
+              explanation: parsedData.score?.explanation,
+              skills: parsedData.candidate?.skills,
+              experience_years: parsedData.candidate?.experience_years,
+              applied_role: parsedData.candidate?.applied_role,
+            },
+            red_flags: parsedData.red_flags || [],
+            summary: parsedData.score?.explanation?.slice(0, 200) || '',
+            source: 'upload',
+            // Embedding from Agent 1 — stored in pgvector vector(768) column
+            embedding: ocrResult.embedding ?? undefined,
+          }),
+      );
 
       if (candidateId) {
-        console.log(`[Pipeline] Candidate saved to Supabase: ${candidateId} (embedding: ${ocrResult.embedding ? ocrResult.embedding.length + '-dim' : 'none'})`);
+        console.log('[Pipeline] Candidate saved to Supabase', {
+          requestId,
+          candidateId,
+          embeddingDimensions: ocrResult.embedding?.length ?? 0,
+        });
       } else {
-        console.log('[Pipeline] Supabase not configured — candidate not persisted');
+        console.log('[Pipeline] Supabase not configured — candidate not persisted', {
+          requestId,
+        });
       }
     } catch (saveErr) {
       // Non-fatal: log and continue — the API still returns the parsed result
-      console.warn('[Pipeline] Failed to persist candidate to Supabase:', saveErr);
+      console.warn('[Pipeline] Failed to persist candidate to Supabase', {
+        requestId,
+        errorType: saveErr instanceof Error ? saveErr.name : 'UnknownError',
+      });
     }
 
-    // ── Validate and return ───────────────────────────────────────────────────
-    const validated = ParserOutputSchema.safeParse(parsedData);
-    const finalData = validated.success ? validated.data : parsedData;
-
     const elapsed = Date.now() - pipelineStart;
-    console.log(`[Pipeline] COMPLETE — ${elapsed}ms | candidate: ${finalData.candidate?.name} | score: ${finalData.score?.total}`);
+    console.log('[Pipeline] completed', {
+      requestId,
+      elapsedMs: elapsed,
+      score: parsedData.score.total,
+      ...getActiveTraceFields(),
+    });
 
-    return NextResponse.json({ ...finalData, candidateId });
+    return NextResponse.json({ ...parsedData, candidateId, requestId });
 
   } catch (error) {
-    console.error('[Pipeline] Error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    console.error('[Pipeline] failed', {
+      requestId,
+      errorType: error instanceof Error ? error.name : 'UnknownError',
+      ...getActiveTraceFields(),
+    });
+    return NextResponse.json(
+      { error: 'Internal Server Error', requestId },
+      { status: 500 },
+    );
   }
 }
 
@@ -156,13 +204,13 @@ async function callOcrAgent(base64Data: string, mimeType: string, fileName: stri
   formData.append('file', blob, fileName);
 
   try {
-    const response = await fetch(`${OCR_SERVICE_URL}/extract`, {
-      method: 'POST',
-      headers: {
-        'X-OCR-Token': process.env.OCR_SERVICE_TOKEN || '',
-      },
-      body: formData,
-    });
+    const response = await fetch(
+      `${OCR_SERVICE_URL}/extract`,
+      createOcrFetchOptions(
+        formData,
+        process.env.OCR_SERVICE_TOKEN || '',
+      ),
+    );
     
     if (!response.ok) {
       console.warn(`[OCR] Service returned status: ${response.status}`);

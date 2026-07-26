@@ -1,5 +1,5 @@
 
-import { ParserInput } from '../app/api/types';
+import { ParserInput } from '../lib/contracts/parser';
 
 async function main() {
     const PARSER_ENDPOINT = 'http://localhost:3000/api/parser';

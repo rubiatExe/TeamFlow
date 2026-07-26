@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateMagicLink } from '@/lib/magic-link';
-import { sendInviteSMS } from '@/lib/twilio';
-import { updateCandidateStatus } from '@/lib/supabase';
+import { generateMagicLink } from '@/lib/integrations/magic-link';
+import { sendInviteSMS } from '@/lib/integrations/twilio';
+import { updateCandidateStatus } from '@/lib/db/supabase';
 
 export async function POST(req: NextRequest) {
     try {
