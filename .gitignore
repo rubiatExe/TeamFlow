@@ -24,6 +24,7 @@
 .DS_Store
 *.pem
 application_default_credentials.json
+gha-creds-*.json
 /ops/observability/credentials/
 
 # debug
@@ -49,3 +50,10 @@ venv/
 __pycache__/
 *.pyc
 services/document-processor/sample-resume.*
+
+# Local document-rendering and résumé inspection artifacts
+/tmp/
+supabase/.temp/
+
+# Offline evaluation outputs can contain model responses or review annotations
+/services/hiring-agent/evaluation-runs/
