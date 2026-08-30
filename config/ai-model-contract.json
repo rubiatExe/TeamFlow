@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "documentOcr": {
+    "models": [
+      "gemini-3.1-pro-preview"
+    ]
+  },
+  "structuredScorer": {
+    "primary": "gemini-3.1-pro-preview",
+    "fallback": "gemini-3.1-pro-preview"
+  },
+  "hiringAgent": {
+    "primary": "gemini-3.7-flash",
+    "fallback": "gemini-3.6-flash"
+  },
+  "embedding": {
+    "apiModel": "models/gemini-embedding-001",
+    "dimensions": 768,
+    "documentTask": "RETRIEVAL_DOCUMENT",
+    "queryTask": "RETRIEVAL_QUERY"
+  }
+}
