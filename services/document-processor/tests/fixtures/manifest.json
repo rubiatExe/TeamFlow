@@ -1,0 +1,33 @@
+{
+  "files": {
+    "corrupt-truncated.pdf": {
+      "critical_text": [],
+      "kind": "intentionally_truncated",
+      "sha256": "0cbbeda620b98b32d4af880f73246b5e51750c2ac77d8616464c19229c45f3b9"
+    },
+    "digital-resume.pdf": {
+      "critical_text": [
+        "Jordan Rivera",
+        "Northstar Cafe",
+        "2022-2025",
+        "jordan.rivera@example.test",
+        "+1 202-555-0147"
+      ],
+      "kind": "digital_text_layer",
+      "sha256": "66c21f25573c921ed5158d4f05ce3571fd7fd5763774723025a51a2731e5bbbb"
+    },
+    "scanned-resume.pdf": {
+      "critical_text": [
+        "Morgan Lee",
+        "Harbor Cafe",
+        "2021-2024",
+        "morgan.lee@example.test",
+        "202-555-0188"
+      ],
+      "kind": "image_only_scanned",
+      "sha256": "a362aca8a4ea07155fe7e824af762303cbb9f57c38beb5fa086ce0a8b8bef8a0"
+    }
+  },
+  "schema_version": "1.0",
+  "synthetic_only": true
+}

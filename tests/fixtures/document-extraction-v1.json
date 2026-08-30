@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "document_id": "doc-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "status": "degraded",
+  "markdown": "Jordan Rivera\n\nNorthstar Cafe 2022-2025",
+  "text": "Jordan Rivera\n\nNorthstar Cafe 2022-2025",
+  "source_blocks": [
+    {
+      "source_block_id": "src-aaaaaaaaaaaa-p0001-b0001-006cb820d755",
+      "page_number": 1,
+      "ordinal": 1,
+      "text": "Jordan Rivera"
+    },
+    {
+      "source_block_id": "src-aaaaaaaaaaaa-p0001-b0002-b06d22c8859c",
+      "page_number": 1,
+      "ordinal": 2,
+      "text": "Northstar Cafe 2022-2025"
+    }
+  ],
+  "embedding": null,
+  "extraction_method": "pdf_text",
+  "model_id": "pypdf-6.16.2",
+  "embedding_model_id": null,
+  "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "mock": false,
+  "warnings": [
+    "embedding_failed"
+  ],
+  "quality": {
+    "assessment": "usable",
+    "character_count": 39,
+    "block_count": 2,
+    "page_count": 1,
+    "reason_codes": []
+  }
+}
