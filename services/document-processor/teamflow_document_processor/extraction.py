@@ -718,6 +718,14 @@ class DocumentExtractionService:
                 mock=True,
             )
 
+        # PDF text objects are not proof that text is visible: off-page, clipped,
+        # transparent, or occluded text can still be returned by pypdf. Until PDFs
+        # are rasterized in the isolated worker and OCR receives only those pixels,
+        # accepting either parser or provider text would make hidden content
+        # scoreable. Keep the externally reachable path fail-closed.
+        if normalized_mime == "application/pdf":
+            raise UploadValidationError("pdf_visual_validation_unavailable", 503)
+
         page_count = 1
         extraction_method = ExtractionMethod.GEMINI_VISION
         model_id: str | None = None
