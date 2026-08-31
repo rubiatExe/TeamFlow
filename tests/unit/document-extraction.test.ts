@@ -9,6 +9,10 @@ import {
   assertDocumentScoreable,
   deriveDocumentScoreability,
 } from '../../lib/contracts/document-extraction.ts';
+import {
+  MAX_DOCUMENT_BYTES,
+  ParserInputSchema,
+} from '../../lib/contracts/parser.ts';
 
 const CONTENT_SHA256 = 'a'.repeat(64);
 
@@ -20,7 +24,7 @@ function blockId(page: number, ordinal: number, text: string): string {
   return `src-${CONTENT_SHA256.slice(0, 12)}-p${page.toString().padStart(4, '0')}-b${ordinal.toString().padStart(4, '0')}-${digest}`;
 }
 
-test('validates the canonical v1 extraction fixture', () => {
+test('shares the same v1 extraction fixture with the Python contract', () => {
   const fixture = JSON.parse(readFileSync(
     new URL('../fixtures/document-extraction-v1.json', import.meta.url),
     'utf8',
@@ -328,4 +332,73 @@ test('rejects malformed or non-finite 768-dimensional embeddings', () => {
       embedding,
     }).success, false);
   }
+});
+
+test('accepts only strict canonical inline PDF, JPEG or PNG parser input', () => {
+  const valid = {
+    fileData: 'JVBERi0xLjQK',
+    mimeType: 'application/pdf',
+    fileName: 'résumé-😀.pdf',
+    roleId: 'barista',
+  };
+  assert.deepEqual(ParserInputSchema.parse(valid), valid);
+
+  for (const invalid of [
+    { ...valid, fileUrl: 'https://example.test/resume.pdf' },
+    { ...valid, fileData: '' },
+    { ...valid, fileData: 'data:application/pdf;base64,JVBERi0xLjQK' },
+    { ...valid, fileData: 'YQ' },
+    { ...valid, fileData: 'YQ==\n' },
+    { ...valid, fileData: 'YR==' },
+    { ...valid, mimeType: 'application/msword' },
+    { ...valid, mimeType: 'image/heic' },
+    { ...valid, fileName: '../resume.pdf' },
+    { ...valid, extra: true },
+    { mimeType: 'application/pdf', fileName: 'resume.pdf' },
+    { fileData: valid.fileData, fileName: valid.fileName },
+    { fileData: valid.fileData, mimeType: valid.mimeType },
+  ]) {
+    assert.equal(ParserInputSchema.safeParse(invalid).success, false);
+  }
+
+  assert.equal(ParserInputSchema.safeParse({
+    ...valid,
+    mimeType: 'image/jpeg',
+  }).success, true);
+  assert.equal(ParserInputSchema.safeParse({
+    ...valid,
+    mimeType: 'image/png',
+  }).success, true);
+});
+
+test('enforces decoded upload bytes and filename Unicode code-point bounds', () => {
+  const valid = {
+    fileData: 'YQ==',
+    mimeType: 'application/pdf',
+    fileName: 'resume.pdf',
+  };
+  const oversized = Buffer.alloc(MAX_DOCUMENT_BYTES + 1).toString('base64');
+  assert.equal(ParserInputSchema.safeParse({
+    ...valid,
+    fileData: oversized,
+  }).success, false);
+
+  const exactLimit = Buffer.alloc(MAX_DOCUMENT_BYTES).toString('base64');
+  assert.equal(ParserInputSchema.safeParse({
+    ...valid,
+    fileData: exactLimit,
+  }).success, true);
+
+  assert.equal(ParserInputSchema.safeParse({
+    ...valid,
+    fileName: '😀'.repeat(255),
+  }).success, true);
+  assert.equal(ParserInputSchema.safeParse({
+    ...valid,
+    fileName: '😀'.repeat(256),
+  }).success, false);
+  assert.equal(ParserInputSchema.safeParse({
+    ...valid,
+    fileName: '\u200B\uFEFF',
+  }).success, false);
 });
