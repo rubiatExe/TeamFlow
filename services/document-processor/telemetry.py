@@ -1,20 +1,30 @@
 """
 TeamFlow — OpenTelemetry Setup
 -------------------------------
-Configures the OpenTelemetry SDK for the Python microservice.
-Exports distributed traces and metrics to Google Cloud Trace/Monitoring natively.
+Configures the OpenTelemetry SDK for the document processor.
 
-All instrumentation uses the OpenTelemetry GenAI Semantic Conventions:
-  https://opentelemetry.io/docs/specs/semconv/gen-ai/
+Production requires native Google Cloud Trace and Monitoring exporters to be
+constructible before the application starts. Development and test environments
+retain optional console traces and in-memory metrics.
 
 Environment variables:
-  ENVIRONMENT                   Set to "production" to enable Cloud Trace/Monitoring
-  OTEL_SERVICE_NAME             Service name tag in Cloud Trace (default: "teamflow-python-service")
+  ENVIRONMENT                   development, test, or production
+  DOCUMENT_PROCESSOR_OTEL_SERVICE_NAME
+                                Stable service name override
+  OTEL_SERVICE_NAME             Standard fallback service name override
   OTEL_TRACES_SAMPLER_ARG       Root trace sample ratio from 0.0 to 1.0
   OTEL_CONSOLE_EXPORT_ENABLED   Print local spans when true (default: true)
 """
 
+from __future__ import annotations
+
+import logging
+import math
 import os
+import re
+import threading
+from collections.abc import Mapping
+from typing import Any
 
 from opentelemetry import metrics, trace
 from opentelemetry.sdk.metrics import MeterProvider
@@ -24,104 +34,185 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 
+_STABLE_SERVICE_NAME = "teamflow-document-processor"
+_SERVICE_VERSION = "2.0.0"
+_VALID_ENVIRONMENTS = frozenset({"development", "test", "production"})
+_SERVICE_NAME_PATTERN = re.compile(r"[a-z][a-z0-9._-]{0,62}")
+
 _telemetry_initialized = False
+_telemetry_lock = threading.Lock()
+logger = logging.getLogger(__name__)
 
 
-def _service_name(default: str) -> str:
-    return os.getenv(
-        "DOCUMENT_PROCESSOR_OTEL_SERVICE_NAME",
-        os.getenv("OTEL_SERVICE_NAME", default),
-    )
+def _environment_setting(
+    environ: Mapping[str, str] = os.environ,
+) -> str:
+    value = environ.get("ENVIRONMENT", "development").strip().lower()
+    if value not in _VALID_ENVIRONMENTS:
+        raise RuntimeError("ENVIRONMENT_invalid")
+    return value
 
 
-def setup_telemetry(service_name: str = "teamflow-python-service") -> None:
-    """
-    Initialize OpenTelemetry tracing and metrics providers.
-    Safe to call multiple times — only initializes once.
-    """
-    global _telemetry_initialized
-    if _telemetry_initialized:
-        return
-    _telemetry_initialized = True
-
-    resource = Resource.create(
-        {
-            "service.name": _service_name(service_name),
-            "service.version": "1.0.0",
-            "deployment.environment": os.getenv("ENVIRONMENT", "development"),
-            "teamflow.component": "document-processor",
-        }
-    )
-
-    _setup_traces(resource)
-    _setup_metrics(resource)
-
-    print(f"[OTel] Telemetry initialized for service: {_service_name(service_name)}")
+def _console_export_enabled(
+    environ: Mapping[str, str] = os.environ,
+) -> bool:
+    value = environ.get("OTEL_CONSOLE_EXPORT_ENABLED", "true").strip().lower()
+    if value not in {"true", "false"}:
+        raise RuntimeError("OTEL_CONSOLE_EXPORT_ENABLED_invalid")
+    return value == "true"
 
 
-def _setup_traces(resource: Resource) -> None:
-    """Configure the TracerProvider with GCP + Console exporters."""
-    environment = os.getenv("ENVIRONMENT", "development")
-    default_sample_ratio = 0.1 if environment == "production" else 1.0
-
+def _bounded_sample_ratio(raw: str) -> float:
     try:
-        configured_sample_ratio = float(
-            os.getenv("OTEL_TRACES_SAMPLER_ARG", str(default_sample_ratio))
-        )
+        value = float(raw)
     except ValueError:
-        configured_sample_ratio = default_sample_ratio
+        raise RuntimeError("OTEL_TRACES_SAMPLER_ARG_invalid") from None
+    if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+        raise RuntimeError("OTEL_TRACES_SAMPLER_ARG_invalid")
+    return value
 
-    sample_ratio = min(max(configured_sample_ratio, 0.0), 1.0)
+
+def _service_name(
+    default: str,
+    *,
+    environment: str,
+    environ: Mapping[str, str] = os.environ,
+) -> str:
+    value = environ.get(
+        "DOCUMENT_PROCESSOR_OTEL_SERVICE_NAME",
+        environ.get("OTEL_SERVICE_NAME", default),
+    )
+    if not _SERVICE_NAME_PATTERN.fullmatch(value):
+        raise RuntimeError("OTEL_SERVICE_NAME_invalid")
+    if environment == "production" and value != _STABLE_SERVICE_NAME:
+        raise RuntimeError("OTEL_SERVICE_NAME_invalid")
+    return value
+
+
+def _shutdown_quietly(component: Any) -> None:
+    try:
+        component.shutdown()
+    except Exception:
+        # Cleanup errors must not disclose exporter configuration or credentials.
+        logger.error("OpenTelemetry component cleanup failed")
+
+
+def _build_trace_provider(
+    resource: Resource,
+    *,
+    environment: str,
+    sample_ratio: float,
+    console_enabled: bool,
+) -> TracerProvider:
     tracer_provider = TracerProvider(
         resource=resource,
         sampler=ParentBased(TraceIdRatioBased(sample_ratio)),
     )
 
     if environment == "production":
-        # Production: export spans to Google Cloud Trace natively
         try:
             from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
+
             cloud_trace_exporter = CloudTraceSpanExporter()
             tracer_provider.add_span_processor(BatchSpanProcessor(cloud_trace_exporter))
-            print("[OTel] Trace exporter → Google Cloud Trace")
-        except Exception as e:
-            print(f"[OTel] Failed to setup Cloud Trace: {e}")
-            tracer_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+        except Exception:
+            _shutdown_quietly(tracer_provider)
+            logger.error("Cloud Trace exporter unavailable")
+            raise RuntimeError("cloud_trace_exporter_unavailable") from None
+        logger.info("Cloud Trace exporter configured")
+    elif console_enabled:
+        tracer_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+        logger.info("Console trace exporter configured")
     else:
-        # Local dev: optionally print spans without requiring a backend.
-        console_enabled = (
-            os.getenv("OTEL_CONSOLE_EXPORT_ENABLED", "true").lower() == "true"
-        )
-        if console_enabled:
-            tracer_provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
-            print("[OTel] Trace exporter → Console")
-        else:
-            print("[OTel] Trace exporter → Disabled")
+        logger.info("Trace exporter disabled")
 
-    trace.set_tracer_provider(tracer_provider)
+    return tracer_provider
 
 
-def _setup_metrics(resource: Resource) -> None:
-    """Configure the MeterProvider with GCP exporter for token usage metrics."""
-    environment = os.getenv("ENVIRONMENT", "development")
-
+def _build_meter_provider(
+    resource: Resource,
+    *,
+    environment: str,
+) -> MeterProvider:
     if environment == "production":
-        # Production: export metrics to Google Cloud Monitoring natively
+        metric_reader: PeriodicExportingMetricReader | None = None
         try:
             from opentelemetry.exporter.cloud_monitoring import CloudMonitoringMetricsExporter
+
             cloud_monitoring_exporter = CloudMonitoringMetricsExporter()
             metric_reader = PeriodicExportingMetricReader(
                 cloud_monitoring_exporter,
-                export_interval_millis=30_000,  # Export every 30s
+                export_interval_millis=30_000,
             )
-            print("[OTel] Metric exporter → Google Cloud Monitoring")
-        except Exception as e:
-            print(f"[OTel] Failed to setup Cloud Monitoring: {e}")
-            metric_reader = InMemoryMetricReader()
-    else:
-        # Local dev: no-op metric export
-        metric_reader = InMemoryMetricReader()
-        print("[OTel] Metric exporter → In-memory")
+            meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
+        except Exception:
+            if metric_reader is not None:
+                _shutdown_quietly(metric_reader)
+            logger.error("Cloud Monitoring exporter unavailable")
+            raise RuntimeError("cloud_monitoring_exporter_unavailable") from None
+        logger.info("Cloud Monitoring exporter configured")
+        return meter_provider
 
-    meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
-    metrics.set_meter_provider(meter_provider)
+    metric_reader = InMemoryMetricReader()
+    logger.info("In-memory metric reader configured")
+    return MeterProvider(resource=resource, metric_readers=[metric_reader])
+
+
+def setup_telemetry(service_name: str = _STABLE_SERVICE_NAME) -> None:
+    """Initialize tracing and metrics once, without partial production fallback."""
+
+    global _telemetry_initialized
+    with _telemetry_lock:
+        if _telemetry_initialized:
+            return
+
+        environment = _environment_setting()
+        console_enabled = _console_export_enabled()
+        configured_service_name = _service_name(
+            service_name,
+            environment=environment,
+        )
+        default_sample_ratio = 0.1 if environment == "production" else 1.0
+        sample_ratio = _bounded_sample_ratio(
+            os.getenv("OTEL_TRACES_SAMPLER_ARG", str(default_sample_ratio))
+        )
+        resource = Resource.create(
+            {
+                "service.name": configured_service_name,
+                "service.version": _SERVICE_VERSION,
+                "deployment.environment": environment,
+                "teamflow.component": "document-processor",
+            }
+        )
+
+        tracer_provider = _build_trace_provider(
+            resource,
+            environment=environment,
+            sample_ratio=sample_ratio,
+            console_enabled=console_enabled,
+        )
+        try:
+            meter_provider = _build_meter_provider(
+                resource,
+                environment=environment,
+            )
+        except BaseException:
+            _shutdown_quietly(tracer_provider)
+            raise
+
+        try:
+            # Both providers are fully constructed before either becomes global.
+            trace.set_tracer_provider(tracer_provider)
+            if trace.get_tracer_provider() is not tracer_provider:
+                raise RuntimeError("tracer_provider_installation_rejected")
+            metrics.set_meter_provider(meter_provider)
+            if metrics.get_meter_provider() is not meter_provider:
+                raise RuntimeError("meter_provider_installation_rejected")
+        except Exception:
+            _shutdown_quietly(meter_provider)
+            _shutdown_quietly(tracer_provider)
+            logger.error("OpenTelemetry provider installation failed")
+            raise RuntimeError("telemetry_provider_installation_failed") from None
+
+        _telemetry_initialized = True
+        logger.info("OpenTelemetry initialized")
