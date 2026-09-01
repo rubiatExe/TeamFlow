@@ -1,7 +1,7 @@
 fastapi
 uvicorn
 python-multipart
-google-genai
+google-genai==2.14.0
 httpx
 pydantic==2.13.4
 pypdf==6.16.2
