@@ -27,7 +27,9 @@ _MEDICAL_TRAIT_RE = re.compile(
 )
 _INSTRUCTIONAL_MANIPULATION_RE = re.compile(
     r"(?is)\b(?:ignore|disregard|override|forget)\b.{0,60}"
-    r"\b(?:instruction|prompt|policy|criterion|criteria)\b|"
+    r"\b(?:instructions?|prompts?|polic(?:y|ies)|rules?|criterion|criteria|"
+    r"(?:system|developer)\s+(?:messages?|instructions?|prompts?))\b|"
+    r"\b(?:system|developer)\s+(?:messages?|instructions?|prompts?)\s*:|"
     r"\b(?:set|assign|change|output|give)\b.{0,40}"
     r"\b(?:fit[ _-]?score|candidate[ _-]?score|hiring[ _-]?score|"
     r"rank|ranking|recommendation)\b|"
