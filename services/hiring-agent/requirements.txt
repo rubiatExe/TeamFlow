@@ -3,4 +3,6 @@ httpx==0.28.1
 langchain-core==1.6.1
 langgraph==1.2.11
 opentelemetry-api==1.44.0
+opentelemetry-exporter-gcp-trace==1.12.0
+opentelemetry-sdk==1.44.0
 pydantic==2.13.4
