@@ -21,6 +21,7 @@ _AGE_CRITERION_RE = re.compile(
     r"(?:or|and)\s+older\b|\bminimum\s+age\b|"
     r"\bage\s*:?\s*\d{1,3}\s*\+"
 )
+_UUID_RE = re.compile(r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
 
 
 def _safe_evidence_text(value: Any, *, max_length: int) -> str | None:
@@ -141,13 +142,25 @@ def project_required_context(
             required_context.get("candidate"),
             merchant_id=merchant_id,
         )
-        projected["candidate"] = candidate or {"error": "Candidate evidence unavailable"}
+        projected["candidate"] = (
+            {"resume_text": candidate["resume_text"]}
+            if candidate
+            else {"error": "Candidate evidence unavailable"}
+        )
     if "job_requirements" in required_context:
         role = project_role_context(
             required_context.get("job_requirements"),
             merchant_id=merchant_id,
         )
-        projected["job_requirements"] = role or {"error": "Job requirements unavailable"}
+        projected["job_requirements"] = (
+            {
+                key: role[key]
+                for key in ("title", "description", "dealbreakers", "nice_to_haves")
+                if key in role
+            }
+            if role
+            else {"error": "Job requirements unavailable"}
+        )
     return projected
 
 
@@ -193,25 +206,27 @@ def build_reasoning_input(
         if len(context_bytes) > MAX_REASONING_CONTEXT_BYTES:
             clean_context = {"error": "Required context exceeded the safe limit"}
 
+    model_request: dict[str, Any] = {"operation": request.operation.value}
+    if request.instructions:
+        model_request["instructions"] = redact_sensitive_text(
+            request.instructions,
+            max_length=4_000,
+        )
     payload = {
-        "request": sanitize_output_json(
-            request.model_dump(
-                by_alias=True,
-                exclude_none=True,
-                exclude={"score", "analysis", "summary", "red_flags"},
-                mode="json",
-            )
-        ),
+        "request": sanitize_output_json(model_request),
         "required_context": clean_context,
     }
     # Escaping tag characters prevents untrusted strings from closing the data
     # boundary while preserving a valid JSON document for the model.
     serialized = (
-        json.dumps(
-            payload,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            allow_nan=False,
+        _UUID_RE.sub(
+            "[REDACTED_IDENTIFIER]",
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            ),
         )
         .replace("<", "\\u003c")
         .replace(">", "\\u003e")

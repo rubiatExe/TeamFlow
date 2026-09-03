@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -47,6 +48,17 @@ MAX_TOOL_RESULT_BYTES = 32_768
 MAX_TOOL_CALL_ID_LENGTH = 128
 HUMAN_REVIEW_NOTICE = "A human reviewer must make the final hiring decision."
 _SAFE_TOOL_CALL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+_STABLE_IDENTIFIER_RE = re.compile(
+    r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"
+)
+_MODEL_SAFE_SEARCH_TEXT_FIELDS = (
+    "title",
+    "current_title",
+    "experience",
+    "notes",
+)
+_MAX_SEARCH_SKILLS = 50
+_MAX_SEARCH_EVIDENCE_TEXT_LENGTH = 1_000
 _AUTONOMOUS_DECISION_RE = re.compile(
     r"(?is)\b(?:hire|hired|hiring|reject|rejected|rejecting)\b.{0,50}"
     r"\b(?:automatically|immediately|without\s+(?:human|manager)\s+review)\b|"
@@ -125,17 +137,62 @@ def _project_search_result(result: Any, *, merchant_id: str) -> list[dict[str, A
         returned_scope = row.get("merchant_id")
         if returned_scope is not None and str(returned_scope) != merchant_id:
             return None
-        clean = sanitize_output_json(row)
-        if not isinstance(clean, dict):
+        sanitized = sanitize_output_json(row)
+        if not isinstance(sanitized, dict):
             return None
-        for circular_field in ("analysis", "fit_score", "red_flags", "summary"):
-            clean.pop(circular_field, None)
-        serialized = json.dumps(clean, ensure_ascii=False, separators=(",", ":"))
+        # Search results cross the provider boundary twice: into the next reasoning
+        # call and then into structured finalization. Project an explicit set of
+        # job-evidence fields instead of relaying candidate identity, workflow state,
+        # timestamps, or prior model judgments.
+        clean: dict[str, Any] = {}
+        for key in _MODEL_SAFE_SEARCH_TEXT_FIELDS:
+            if key not in sanitized:
+                continue
+            value = sanitized[key]
+            if not isinstance(value, str) or not value.strip():
+                return None
+            clean[key] = value[:_MAX_SEARCH_EVIDENCE_TEXT_LENGTH]
+
+        if "skills" in sanitized:
+            skills = sanitized["skills"]
+            if (
+                not isinstance(skills, list)
+                or len(skills) > _MAX_SEARCH_SKILLS
+                or any(not isinstance(skill, str) or not skill.strip() for skill in skills)
+            ):
+                return None
+            clean["skills"] = [skill[:_MAX_SEARCH_EVIDENCE_TEXT_LENGTH] for skill in skills]
+
+        if "similarity" in sanitized:
+            similarity = sanitized["similarity"]
+            if (
+                isinstance(similarity, bool)
+                or not isinstance(similarity, int | float)
+                or not math.isfinite(similarity)
+                or not 0 <= similarity <= 1
+            ):
+                return None
+            clean["similarity"] = similarity
+
+        if "mock" in sanitized:
+            if type(sanitized["mock"]) is not bool:
+                return None
+            clean["mock"] = sanitized["mock"]
+
+        serialized = _STABLE_IDENTIFIER_RE.sub(
+            "[REDACTED_IDENTIFIER]",
+            json.dumps(
+                clean,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            ),
+        )
         if contains_unsafe_hiring_language(serialized) or contains_instructional_manipulation(
             serialized
         ):
             return None
-        projected.append(clean)
+        projected.append(json.loads(serialized))
     return projected
 
 
@@ -551,12 +608,12 @@ def create_nodes(
             )
         except ValueError:
             raise InvalidModelOutputError("structured model output failed validation") from None
-        if contains_unsafe_hiring_language(draft.model_dump_json()):
+        serialized_draft = draft.model_dump_json()
+        if contains_unsafe_hiring_language(serialized_draft):
             raise ModelSafetyError("model used a protected or medical characteristic")
-        public_text = f"{draft.summary}\n{draft.recommendation}"
-        if _AUTONOMOUS_DECISION_RE.search(public_text):
+        if _AUTONOMOUS_DECISION_RE.search(serialized_draft):
             raise ModelSafetyError("model claimed autonomous hiring authority")
-        if _PERSISTENCE_CLAIM_RE.search(public_text):
+        if _PERSISTENCE_CLAIM_RE.search(serialized_draft):
             raise InvalidModelOutputError("model claimed unverified persistence")
         return {"draft": draft}
 
