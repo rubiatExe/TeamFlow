@@ -1,7 +1,7 @@
 # 🎯 TeamFlow — Ultimate Interview Zoom Screen-Share Demo Guide
 
-> **Target Audience**: Technical Recruiters, Engineering Managers, Staff/Principal Engineers  
-> **Estimated Demo Duration**: 10–12 Minutes  
+> **Target Audience**: Technical Recruiters, Engineering Managers, Staff/Principal Engineers
+> **Estimated Demo Duration**: 10–12 Minutes
 > **Key Objective**: Demonstrate a production-minded hybrid AI architecture: a reliable deterministic resume pipeline, an optional LangGraph hiring workflow with MCP tools, Supabase Postgres integration, OpenTelemetry instrumentation, and keyless GCP Workload Identity Federation (WIF) configuration.
 >
 > **Evidence rule:** Treat every checklist item below as something to verify in the
@@ -51,13 +51,13 @@ Ensure your desktop is organized cleanly with no personal notifications before s
 
 #### 💬 What to Say:
 > *"Hi [Interviewer Name]! Today I want to demonstrate **TeamFlow** — an enterprise AI-powered hiring platform built specifically for high-turnover service businesses like specialty coffee shops and restaurants.*
-> 
+>
 > *Instead of putting every responsibility behind one prompt, I built a hybrid architecture:*
 > - *A deterministic upload pipeline separates document extraction, structured scoring, and persistence so the core workflow remains predictable.*
 > - *A separate LangGraph service handles optional conversational hiring analysis through explicit, inspectable nodes.*
 > - *LangChain connects the graph to Gemini and a private FastMCP process exposing narrowly scoped Supabase tools.*
 > - * **Infrastructure**: Supabase Postgres integration, OpenTelemetry instrumentation, and keyless GCP Workload Identity Federation configuration in CI/CD.*
-> 
+>
 > *Let me share my screen and verify the parts of the pipeline running in this environment."*
 
 ---
@@ -71,7 +71,7 @@ Ensure your desktop is organized cleanly with no personal notifications before s
 
 #### 💬 What to Say while uploading:
 > *"When a manager uploads a candidate resume, it triggers a deterministic three-stage pipeline:*
-> 
+>
 > 1. **Document processor (port 8000)** accepts raw document bytes, performs extraction, and returns clean text plus an embedding when available, with explicit degraded provenance otherwise.
 > 2. **Structured scorer (Next.js)** evaluates that text against role dealbreakers and essential skills, returning a validated fit score and analysis.
 > 3. **Server-side persistence** writes the validated candidate through Supabase without exposing its service-role credential.*
@@ -109,9 +109,9 @@ observed values.
 > `/v1/resume-reviews` path is the narrower two-agent design: Agent 1 classifies
 > configured criteria with literal source references, application code owns score
 > math and ranking, and Agent 2 receives only validated unknown gaps.*
-> 
-> *Instead of dumping database schemas into prompts, the legacy path exposes four
-> read-only operations:*
+>
+> *Instead of dumping database schemas into prompts, one shared read-only MCP catalog
+> exposes six operations. The legacy path selects these four:*
 > - `get_job_requirements(role_id, merchant_id)`
 > - `get_candidate(candidate_id, merchant_id)`
 > - `list_candidates(merchant_id, status_filter, limit)`
@@ -120,10 +120,10 @@ observed values.
 > *Candidate score mutation is deliberately absent from FastMCP. Legacy explicit-write
 > requests fail closed; only an authenticated Phase 6 human decision may change a
 > durable candidate score.*
-> 
-> *The Phase 4 path uses a separate read-only MCP surface with only
-> `get_resume_document` and `load_active_role_policies`. Neither model receives a
-> tool, and optional review persistence happens deterministically after validation.
+>
+> *The Phase 4 path selects the remaining `get_resume_document` and
+> `load_active_role_policies` operations from that same catalog. Neither model receives
+> a tool, and optional review persistence happens deterministically after validation.
 > Agent 1 failure returns review-required; Agent 2 failure preserves Agent 1 with
 > degraded questions. These behaviors are locally tested with scripted models and
 > HTTP mocks. I do not present a live Supabase/model run unless I have verified it in
@@ -139,9 +139,9 @@ observed values.
 
 #### 💬 What to Say:
 > *"Finally, let's look at our cloud infrastructure and deployment security.*
-> 
+>
 > *In traditional CI/CD pipelines, teams may store static GCP service-account key files inside GitHub secrets. TeamFlow's workflows instead request short-lived credentials through **Workload Identity Federation (WIF)**.*
-> 
+>
 > *The checked-in workflows request a GitHub OIDC token and are configured to exchange it through the WIF provider and service account stored as repository secrets before deploying to Cloud Run. The YAML proves the intended keyless design; I verify the provider trust, IAM bindings, secrets, and successful revision in the Google and GitHub consoles before calling the deployment live."*
 
 ---

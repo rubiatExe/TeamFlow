@@ -326,7 +326,7 @@ export async function callScorerAgent(
 
   const webFormInstructions = isWebForm ? `
 **WEB FORM SUBMISSION EVALUATION:**
-This candidate submitted a web application rather than a traditional resume. Pay close attention to their answers to the "Motivation & Personality" questions. 
+This candidate submitted a web application rather than a traditional resume. Pay close attention to their answers to the "Motivation & Personality" questions.
 - Use their text answers to evaluate personality traits (e.g., enthusiasm, work ethic, teamwork).
 - Factor their "Superpower" and "Above and Beyond" answers into the nuanced fit score.
 - Evaluate their communication skills based on how they wrote their answers.
