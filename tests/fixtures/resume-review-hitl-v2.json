@@ -1,0 +1,102 @@
+{
+  "start_request": {
+    "schema_version": "2.0",
+    "request_id": "61111111-1111-4111-8111-111111111111",
+    "document_id": "doc-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "candidate_id": "62222222-2222-4222-8222-222222222222"
+  },
+  "run_responses": [
+    {
+      "schema_version": "2.0",
+      "run_id": "63333333-3333-4333-8333-333333333333",
+      "request_id": "61111111-1111-4111-8111-111111111111",
+      "document_id": "doc-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "running",
+      "run_version": 1,
+      "review": null,
+      "reason_codes": []
+    },
+    {
+      "schema_version": "2.0",
+      "run_id": "63333333-3333-4333-8333-333333333333",
+      "request_id": "61111111-1111-4111-8111-111111111111",
+      "document_id": "doc-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "pending_review",
+      "run_version": 2,
+      "review": {
+        "review_id": "64444444-4444-4444-8444-444444444444",
+        "review_version": 1
+      },
+      "reason_codes": [
+        "human-approval-required"
+      ]
+    },
+    {
+      "schema_version": "2.0",
+      "run_id": "63333333-3333-4333-8333-333333333333",
+      "request_id": "61111111-1111-4111-8111-111111111111",
+      "document_id": "doc-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "status": "completed",
+      "run_version": 4,
+      "review": {
+        "review_id": "64444444-4444-4444-8444-444444444444",
+        "review_version": 2
+      },
+      "reason_codes": []
+    }
+  ],
+  "decisions": [
+    {
+      "schema_version": "2.0",
+      "decision_id": "65555555-5555-4555-8555-555555555555",
+      "review_id": "64444444-4444-4444-8444-444444444444",
+      "expected_review_version": 1,
+      "action": "approve"
+    },
+    {
+      "schema_version": "2.0",
+      "decision_id": "66666666-6666-4666-8666-666666666666",
+      "review_id": "64444444-4444-4444-8444-444444444444",
+      "expected_review_version": 1,
+      "action": "approve_with_edits",
+      "replacement_agent1_output": {
+        "schema_version": "1.0",
+        "role_assessments": [
+          {
+            "role_id": "67777777-7777-4777-8777-777777777777",
+            "criterion_assessments": [
+              {
+                "criterion_id": "customer-service",
+                "status": "met",
+                "evidence": [
+                  {
+                    "criterion_id": "customer-service",
+                    "exact_quote": "Provided customer service for three years.",
+                    "source_block_id": "src-aaaaaaaaaaaa-p0001-b0001-bbbbbbbbbbbb"
+                  }
+                ]
+              },
+              {
+                "criterion_id": "cash-handling",
+                "status": "unknown",
+                "evidence": []
+              }
+            ]
+          }
+        ],
+        "limitations": [
+          "Cash-handling experience remains unknown."
+        ]
+      },
+      "reason_code": "manager-corrected-evidence"
+    },
+    {
+      "schema_version": "2.0",
+      "decision_id": "68888888-8888-4888-8888-888888888888",
+      "review_id": "64444444-4444-4444-8444-444444444444",
+      "expected_review_version": 1,
+      "action": "reject",
+      "reason_code": "insufficient-job-evidence"
+    }
+  ]
+}
