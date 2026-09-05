@@ -72,6 +72,28 @@ _CONTACT_REQUEST_RE = re.compile(
     r"mailing\s+address|street\s+address|contact\s+(?:details|information))\b|"
     r"\b(?:how|what)\b.{0,30}\b(?:contact|reach)\s+you\b"
 )
+_SAFETY_CONFUSABLE_TRANSLATION = str.maketrans(
+    {
+        "а": "a",
+        "е": "e",
+        "і": "i",
+        "о": "o",
+        "р": "p",
+        "с": "c",
+        "х": "x",
+        "α": "a",
+        "β": "b",
+        "ε": "e",
+        "ι": "i",
+        "κ": "k",
+        "μ": "m",
+        "ν": "n",
+        "ο": "o",
+        "ρ": "p",
+        "τ": "t",
+        "χ": "x",
+    }
+)
 
 
 def _normalized_key(key: str) -> str:
@@ -171,41 +193,22 @@ def contains_unsafe_hiring_language(value: str) -> bool:
     return bool(_PROTECTED_TRAIT_RE.search(value) or _MEDICAL_TRAIT_RE.search(value))
 
 
+def normalize_security_text(value: str) -> str:
+    """Normalize compatibility forms and common prompt-injection confusables."""
+
+    normalized = (
+        unicodedata.normalize("NFKC", value).casefold().translate(_SAFETY_CONFUSABLE_TRANSLATION)
+    )
+    return re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", normalized)
+
+
 def contains_instructional_manipulation(value: str) -> bool:
     """Flag text that tries to control decisions, scores, tools, or prompt policy."""
 
     # NFKC closes full-width compatibility bypasses.  The small confusable map is
     # deliberately scoped to common Latin/Cyrillic prompt-injection substitutions;
     # this remains a lexical defense, not a claim of semantic prompt immunity.
-    normalized = (
-        unicodedata.normalize("NFKC", value)
-        .casefold()
-        .translate(
-            str.maketrans(
-                {
-                    "а": "a",
-                    "е": "e",
-                    "і": "i",
-                    "о": "o",
-                    "р": "p",
-                    "с": "c",
-                    "х": "x",
-                    "α": "a",
-                    "β": "b",
-                    "ε": "e",
-                    "ι": "i",
-                    "κ": "k",
-                    "μ": "m",
-                    "ν": "n",
-                    "ο": "o",
-                    "ρ": "p",
-                    "τ": "t",
-                    "χ": "x",
-                }
-            )
-        )
-    )
-    normalized = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", normalized)
+    normalized = normalize_security_text(value)
     return bool(_INSTRUCTIONAL_MANIPULATION_RE.search(normalized))
 
 
