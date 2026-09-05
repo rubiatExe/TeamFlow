@@ -1,5 +1,10 @@
 # TeamFlow Development Journal
 
+> Historical engineering narrative. Some entries describe earlier prototypes or
+> debugging observations. For current implementation/deployment evidence, use
+> [`docs/resume-claim-evidence.md`](docs/resume-claim-evidence.md); no journal entry by
+> itself proves live production behavior.
+
 ## When “Parsing Failed” Did Not Mean Parsing Failed
 
 **Date:** July 25, 2026
@@ -15,7 +20,9 @@ I retried the same résumé several times. Each attempt took long enough to reac
 
 The runtime logs changed the investigation.
 
-Agent 1—the Cloud Run document processor—had succeeded. It extracted the résumé and produced a 768-dimensional embedding. The failure happened afterward in Agent 2, the Gemini scorer.
+The document-extraction stage had succeeded and produced a 768-dimensional embedding.
+The failure happened afterward in the separate legacy Gemini scorer. These historical
+stage labels predate the current Phase 4 Agent 1 evaluator and Agent 2 question planner.
 
 Gemini had understood the résumé. Its response contained the candidate’s details, a score, an explanation, and red flags. But the response was not consistently valid JSON:
 
@@ -156,11 +163,10 @@ The AI did not need to become perfect. The application needed to become resilien
 
 ### The confusing symptom
 
-After the parsing fix, a résumé completed successfully: OCR ran, an embedding
-was generated, Gemini scored the candidate, and the review appeared in the
-application. I expected that success to create a clear new entry in Google
-Cloud Trace. The Trace Explorer did not show the end-to-end pipeline I was
-looking for.
+During local debugging, a résumé completed successfully: extraction ran, an embedding
+was generated, Gemini scored the candidate, and the review appeared in the application.
+I expected that success to create a clear end-to-end trace. The available trace data did
+not show the causal pipeline I was looking for.
 
 The first instinct was to assume that the exporter had failed. The Cloud Run
 logs disproved that. The request reached `/extract`, returned HTTP 200, and
@@ -212,14 +218,15 @@ spans can still tell an incomplete story.
 > FastAPI, explicit propagation on the Next.js-to-Cloud-Run boundary, and an
 > optional OTLP collector for local Next.js export. I also removed filename
 > PII and added a regression test that injects a known `traceparent` and proves
-> the OCR span keeps the same trace ID. The result is one causal waterfall,
-> while telemetry failures remain isolated from the hiring workflow.”
+> the OCR span keeps the same trace ID. That locally verifies the propagation
+> boundary while telemetry failures remain isolated from the hiring workflow. A
+> deployed Cloud Trace waterfall still requires live verification.”
 
 ---
 
 ## When Local OCR Worked but Production Could Not Reach It
 
-**Area:** Service boundaries, PDF handling, and production parity
+**Area:** Service boundaries, PDF handling, and deployment configuration
 
 ### The situation
 
@@ -235,11 +242,12 @@ I separated the two concerns:
 
 - The durable OCR path became a separately deployable document-processing
   service rather than a local-only dependency.
-- When that service was unavailable, the fallback preserved the original
-  PDF/image and sent it to Gemini as an inline vision input instead of decoding
-  binary data as UTF-8 text.
-- The parser kept the same output contract regardless of whether OCR or the
-  vision fallback supplied the résumé text.
+- Inside the document service, deterministic PDF extraction handles suitable digital
+  PDFs and Gemini transcription handles scanned, mixed, suspicious-layer, or image
+  input without decoding binary bytes as UTF-8 text.
+- If the document service itself is unavailable, Next.js now fails closed; it does not
+  invent text or run an independent fallback.
+- The strict response contract records which extraction method produced the text.
 
 ### What I learned
 
@@ -252,10 +260,11 @@ cannot merely avoid throwing an error.
 
 > “The OCR service worked locally because both processes shared one machine,
 > but the deployed Next.js runtime could not call that local address. I moved
-> the durable path to an independently deployable document processor and made
-> the fallback multimodal: it passes the original file to Gemini Vision rather
-> than converting PDF bytes into invalid text. That gave us production parity
-> without changing the parser's response contract.”
+> the durable path to an independently deployable document processor. Within that
+> service, deterministic PDF parsing handles digital files and Gemini transcription
+> handles scanned or image content. If the service is unreachable, the app fails
+> closed. The repository configures this boundary, but I verify a live deployment
+> separately before claiming production parity.”
 
 ---
 
@@ -313,7 +322,7 @@ budget of a typical serverless API route.
 
 ### What changed
 
-I measured the pipeline as one end-to-end operation and configured an explicit
+I instrumented the pipeline as one end-to-end operation and configured an explicit
 maximum duration for the parser route. I also retained request IDs and
 stage-level logging so I could see whether time was being spent in extraction,
 scoring, or persistence.
@@ -350,9 +359,11 @@ work.
 
 ### What changed
 
-I introduced narrow server-side API boundaries for trusted candidate operations.
-The browser calls the application API; the API performs the authorized
-Supabase operation on the server; and the privileged key remains server-only.
+I introduced narrow server-side API boundaries for candidate operations. The browser
+calls the application API; the API uses a server-side Supabase credential; and the
+privileged key remains server-only. This protects the credential, but the current demo
+still lacks authenticated manager-to-merchant membership and therefore is not a complete
+authorization boundary.
 The client does not receive elevated database credentials.
 
 ### What I learned
@@ -366,8 +377,9 @@ adds real users and tenant-specific policies.
 
 > “The dashboard needed operational access that a browser client should not
 > have. Rather than relaxing Supabase RLS or exposing a service-role key, I
-> created a narrow server-side API boundary. That preserved the database's
-> security model while keeping the UI simple.”
+> created a narrow server-side API boundary so the credential stayed private.
+> The next production requirement is verified manager-to-merchant authorization
+> plus cross-tenant tests; server-side placement alone is not authorization.”
 
 ---
 
@@ -387,11 +399,12 @@ to match the URL, authentication, and environment expected by the Next.js app.
 I made the deployment contract explicit:
 
 - The container respects Cloud Run's `PORT` environment variable.
-- GitHub Actions uses a federated deployment identity instead of storing a
+- The checked-in GitHub Actions workflow is configured for a federated deployment identity instead of storing a
   long-lived cloud credential in the repository.
 - CI checks the application and Python service separately.
-- Deployment configuration lives with the source so the document processor can
-  be reproduced from a clean checkout.
+- Deployment configuration lives with the source so a clean-checkout build can be
+  tested. No clean-checkout image build or successful live deployment was verified in
+  this audit.
 
 ### What I learned
 
@@ -404,9 +417,10 @@ runtime contract is correct in Cloud Run.
 
 > “I treated the Cloud Run deploy as an integration problem rather than just a
 > CI task. The image had to honor the platform port, GitHub Actions needed a
-> short-lived federated identity, and the deployed service had to match the
-> application's authentication and URL contract. That reduced secret exposure
-> and made the deployment repeatable.”
+> short-lived federated identity, and the service configuration had to match the
+> application's authentication and URL contract. That is the checked-in keyless
+> design; I verify the external trust, IAM, secrets, build, and revision before
+> describing it as deployed.”
 
 ---
 
@@ -426,7 +440,8 @@ cause—often at database persistence time.
 
 I made the embedding path explicit in the service contract and database setup:
 
-- The document processor returns the embedding alongside extracted text.
+- The document processor returns extracted text plus an optional embedding with explicit
+  availability/failure provenance.
 - The parser persists it only through the server-side candidate boundary.
 - The Supabase schema and migration define the vector storage shape.
 - Runtime logs record the embedding dimension without recording résumé content.
@@ -462,9 +477,9 @@ important.
 
 ### What changed
 
-I made the direct-upload path explicit and constrained it with validation. The
-parser accepts either an inline file or a file URL, validates the request, and
-keeps the processing pipeline independent of the transport choice.
+I made the direct-upload path explicit and constrained it with validation. The current
+parser accepts only bounded canonical inline Base64 and rejects caller-controlled URLs
+to avoid SSRF and unbounded download risk.
 
 ### What I learned
 
@@ -478,6 +493,6 @@ permanent default.
 ### How I would explain this in an interview
 
 > “For the prototype, I chose direct upload to reduce infrastructure friction
-> and make the résumé-analysis flow easy to demonstrate. I kept the parser
-> transport-agnostic and added validation, while documenting that signed object
-> storage is the next step for larger files and production retention needs.”
+> and make the résumé-analysis flow easy to demonstrate. I bounded and validated
+> inline transport and removed arbitrary URL ingestion. Signed direct-to-object-storage
+> upload is the next step for larger files and production retention needs.”

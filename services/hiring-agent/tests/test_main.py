@@ -211,7 +211,8 @@ def test_container_uses_a_locked_non_root_exec_entrypoint() -> None:
     assert "uvicorn main:app" not in dockerfile
     assert dockerignore.startswith("# Send only the production hiring runtime")
     assert "!requirements.lock" in dockerignore
-    assert "teamflow_hiring_agent/resume_review/" not in dockerignore
+    assert "!teamflow_hiring_agent/**" in dockerignore
+    assert "teamflow_hiring_agent/resume_review/mcp_server.py" in dockerignore
     for marker in (".env*", "gha-creds-*.json", "cloudbuild*.yaml"):
         assert marker in dockerignore
 
@@ -226,6 +227,8 @@ def test_minimal_container_source_imports_main_and_serves_health(tmp_path: Path)
         }
         if Path(directory) == package_root:
             excluded.update({"api.py", "evaluation"})
+        if Path(directory) == package_root / "resume_review":
+            excluded.add("mcp_server.py")
         return excluded
 
     shutil.copy2(service_root / "main.py", tmp_path / "main.py")
@@ -234,6 +237,7 @@ def test_minimal_container_source_imports_main_and_serves_health(tmp_path: Path)
         tmp_path / "teamflow_hiring_agent",
         ignore=container_exclusions,
     )
+    assert not (tmp_path / "teamflow_hiring_agent/resume_review/mcp_server.py").exists()
     exercise = """
 import asyncio
 import sys

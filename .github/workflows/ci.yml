@@ -1,70 +1,183 @@
-name: CI — Lint & Type Check
+name: CI — Release Gate
 
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Preserve every queued main release: GitHub otherwise retains only the newest
+  # pending run, which can skip a service change when deployment scope is diff-based.
+  cancel-in-progress: false
+  queue: max
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_INPUT: "1"
 
 jobs:
-  # ── Next.js: TypeScript + ESLint ──────────────────────────────────────────────
+  deployment-scope:
+    name: Resolve Deployment Scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      document_processor: ${{ steps.changes.outputs.document_processor }}
+      hiring_agent: ${{ steps.changes.outputs.hiring_agent }}
+
+    steps:
+      - name: Resolve main release surfaces
+        id: changes
+        run: |
+          set -euo pipefail
+          document_processor=false
+          hiring_agent=false
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            # Deploy the complete tested main snapshot. Comparing only adjacent
+            # commits can permanently skip a service after a failed/cancelled run.
+            document_processor=true
+            hiring_agent=true
+          fi
+          echo "document_processor=$document_processor" >> "$GITHUB_OUTPUT"
+          echo "hiring_agent=$hiring_agent" >> "$GITHUB_OUTPUT"
+
   nextjs-checks:
-    name: Next.js — TypeScript & Lint
-    runs-on: ubuntu-latest
+    name: Next.js — Types, Lint, Contracts & Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 22.23.2
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies from lockfile
+        run: npm ci --ignore-scripts
 
-      - name: TypeScript — type check
-        run: npm run typecheck
+      - name: Audit Node.js dependency graph
+        run: npm audit --audit-level=high
 
-      - name: ESLint
-        run: npm run lint
+      - name: Unified quick verification
+        run: npm run verify:quick
 
-      - name: Integration contract checks
-        run: npm run verify:contracts
+      - name: Development critical-journey smoke
+        run: npm run test:journeys:development
 
-      - name: Unit tests
-        run: npm test
+      - name: Production build
+        run: npm run build
 
-  # ── Python: Ruff linter ───────────────────────────────────────────────────────
-  python-checks:
-    name: Python — Ruff Lint
-    runs-on: ubuntu-latest
+      - name: Production route-gate smoke
+        run: npm run test:journeys:production
+
+  document-processor-checks:
+    name: Document Processor — Python & Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.11'
+          python-version: 3.11.16
           cache: pip
+          cache-dependency-path: services/document-processor/requirements-dev.lock
 
-      - name: Install Ruff
-        run: pip install ruff -r services/document-processor/requirements-dev.txt
+      - name: Install hash-locked dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          --requirement services/document-processor/requirements-dev.lock
 
-      - name: Ruff — lint document processor
-        run: ruff check services/document-processor/ scripts/verify-models.py
+      - name: Ruff — lint and format document processor
+        run: |
+          ruff check services/document-processor/ scripts/verify-models.py scripts/pytest-no-skips.py
+          ruff format --check services/document-processor/ scripts/verify-models.py scripts/pytest-no-skips.py
 
       - name: Document processor tests
-        run: pytest services/document-processor/tests
+        working-directory: services/document-processor
+        run: |
+          # This gate replaces `python -m pytest tests` so a skip cannot pass CI.
+          python ../../scripts/pytest-no-skips.py -q -rs tests
 
   hiring-agent-checks:
-    name: Hiring Agent — Database, Tests & Image
+    name: Hiring Agent — Python, Contracts & Tests
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    permissions:
-      contents: read
+
+    services:
+      checkpoint-postgres:
+        image: postgres:16.15-trixie@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
+        env:
+          POSTGRES_USER: teamflow_checkpoint_test
+          POSTGRES_PASSWORD: teamflow_checkpoint_test
+          POSTGRES_DB: teamflow_checkpoint_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U teamflow_checkpoint_test -d teamflow_checkpoint_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_POSTGRES_DSN: >-
+        postgresql://teamflow_checkpoint_test:teamflow_checkpoint_test@127.0.0.1:5432/teamflow_checkpoint_test?sslmode=disable
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: 3.11.16
+          cache: pip
+          cache-dependency-path: services/hiring-agent/requirements-dev.lock
+
+      - name: Install hash-locked dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          --requirement services/hiring-agent/requirements-dev.lock
+
+      - name: Ruff — lint and format hiring agent
+        working-directory: services/hiring-agent
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Verify offline evaluation corpus
+        working-directory: services/hiring-agent
+        run: python -m teamflow_hiring_agent.evaluation verify --dataset evals/resume_review_v1
+
+      - name: Hiring-agent tests
+        working-directory: services/hiring-agent
+        run: |
+          # This gate replaces `python -m pytest tests` so a skip cannot pass CI.
+          python ../../scripts/pytest-no-skips.py -q -rs tests \
+            --ignore=tests/test_hiring_reader_migration_phase19.py \
+            --ignore=tests/test_supabase_migration_replay_phase8a.py
+
+  supabase-migration-replay:
+    name: Supabase — Fresh Migration Replay
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
 
     services:
       supabase-postgres:
@@ -80,8 +193,6 @@ jobs:
           --health-retries 20
 
     env:
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-      PIP_NO_INPUT: "1"
       TEST_SUPABASE_POSTGRES_DSN: >-
         postgresql://supabase_admin:teamflow_supabase_replay@127.0.0.1:5433/postgres?sslmode=disable
 
@@ -103,27 +214,75 @@ jobs:
           python -m pip install --only-binary=:all: --require-hashes
           --requirement services/hiring-agent/requirements-dev.lock
 
-      - name: Ruff — lint and format hiring agent
-        run: |
-          ruff check services/hiring-agent scripts/pytest-no-skips.py
-          ruff format --check services/hiring-agent scripts/pytest-no-skips.py
-
-      - name: Hiring-agent unit tests (no skips)
-        working-directory: services/hiring-agent
-        run: >-
-          python ../../scripts/pytest-no-skips.py -q -rs tests
-          --ignore=tests/test_hiring_reader_migration_phase19.py
-
-      - name: Phase 19 local Supabase replay (no skips)
+      - name: Replay every migration in an empty database
         working-directory: services/hiring-agent
         run: >-
           python ../../scripts/pytest-no-skips.py -q -rs
           tests/test_hiring_reader_migration_phase19.py
+          tests/test_supabase_migration_replay_phase8a.py
 
-      - name: Build hiring-agent image
-        run: docker build --tag teamflow-hiring-agent:ci services/hiring-agent
+  container-builds:
+    name: Container — ${{ matrix.service }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - document-processor
+          - hiring-agent
 
-      - name: Verify non-root image runtime
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build production container
+        run: >-
+          docker build
+          --tag teamflow/${{ matrix.service }}:${{ github.sha }}
+          services/${{ matrix.service }}
+
+      - name: Verify non-root image metadata
+        env:
+          IMAGE: teamflow/${{ matrix.service }}:${{ github.sha }}
         run: |
-          runtime_user="$(docker image inspect teamflow-hiring-agent:ci --format '{{.Config.User}}')"
-          test "$runtime_user" = "10001:10001"
+          set -euo pipefail
+          test "$(docker image inspect --format '{{.Config.User}}' "$IMAGE")" = "10001:10001"
+
+  deploy-document-processor:
+    name: Deploy Document Processor
+    if: >-
+      ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          needs.deployment-scope.outputs.document_processor == 'true' }}
+    needs:
+      - deployment-scope
+      - nextjs-checks
+      - document-processor-checks
+      - hiring-agent-checks
+      - supabase-migration-replay
+      - container-builds
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-python-service.yml
+    secrets: inherit
+
+  deploy-hiring-agent:
+    name: Deploy Hiring Agent
+    if: >-
+      ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          needs.deployment-scope.outputs.hiring_agent == 'true' }}
+    needs:
+      - deployment-scope
+      - nextjs-checks
+      - document-processor-checks
+      - hiring-agent-checks
+      - supabase-migration-replay
+      - container-builds
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/deploy-hiring-agent.yml
+    secrets: inherit

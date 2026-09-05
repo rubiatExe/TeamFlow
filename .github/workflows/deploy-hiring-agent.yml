@@ -1,4 +1,4 @@
-name: Deploy Document Processor → Cloud Run
+name: Deploy Hiring Agent → Cloud Run
 
 on:
   workflow_call:
@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: production-document-processor
+  group: production-hiring-agent
   cancel-in-progress: false
   queue: max
 
@@ -17,9 +17,28 @@ env:
 
 jobs:
   predeploy:
-    name: Verify Document Processor Release
+    name: Verify Hiring Agent Release
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
+
+    services:
+      checkpoint-postgres:
+        image: postgres:16.15-trixie@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
+        env:
+          POSTGRES_USER: teamflow_checkpoint_test
+          POSTGRES_PASSWORD: teamflow_checkpoint_test
+          POSTGRES_DB: teamflow_checkpoint_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U teamflow_checkpoint_test -d teamflow_checkpoint_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_POSTGRES_DSN: >-
+        postgresql://teamflow_checkpoint_test:teamflow_checkpoint_test@127.0.0.1:5432/teamflow_checkpoint_test?sslmode=disable
 
     steps:
       - name: Checkout
@@ -38,34 +57,36 @@ jobs:
         with:
           python-version: 3.11.16
           cache: pip
-          cache-dependency-path: services/document-processor/requirements-dev.lock
+          cache-dependency-path: services/hiring-agent/requirements-dev.lock
 
       - name: Install hash-locked dependencies
         run: >-
           python -m pip install --only-binary=:all: --require-hashes
-          --requirement services/document-processor/requirements-dev.lock
+          --requirement services/hiring-agent/requirements-dev.lock
 
       - name: Verify static release contracts
         run: |
           node scripts/verify-model-contract.mjs
           node scripts/verify-release-hardening.mjs
 
-      - name: Lint and format
+      - name: Lint, verify corpus, and test
+        working-directory: services/hiring-agent
         run: |
-          ruff check services/document-processor/ scripts/verify-models.py scripts/pytest-no-skips.py
-          ruff format --check services/document-processor/ scripts/verify-models.py scripts/pytest-no-skips.py
-
-      - name: Test
-        working-directory: services/document-processor
-        run: |
-          # This gate replaces `python -m pytest tests` so a skip cannot pass predeploy.
-          python ../../scripts/pytest-no-skips.py -q -rs tests
+          ruff check .
+          ruff format --check .
+          python -m teamflow_hiring_agent.evaluation verify --dataset evals/resume_review_v1
+          # This gate replaces `python -m pytest tests`; database suites run in CI services.
+          python ../../scripts/pytest-no-skips.py -q -rs tests \
+            --ignore=tests/test_hiring_reader_migration_phase19.py \
+            --ignore=tests/test_hitl_postgres_repository_phase6.py \
+            --ignore=tests/test_hitl_postgres_restart_phase6.py \
+            --ignore=tests/test_supabase_migration_replay_phase8a.py
 
       - name: Build production container
-        run: docker build --tag teamflow/document-processor:${{ github.sha }} services/document-processor
+        run: docker build --tag teamflow/hiring-agent:${{ github.sha }} services/hiring-agent
 
   deploy:
-    name: Stage, Verify & Promote Document Processor
+    name: Stage, Verify & Promote Hiring Agent
     needs: predeploy
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -74,13 +95,20 @@ jobs:
       contents: read
       id-token: write
     env:
-      SERVICE: teamflow-python-service
+      SERVICE: teamflow-hiring-agent
       REGION: us-central1
       REVISION_TAG: candidate-${{ github.run_id }}-${{ github.run_attempt }}
       GOOGLE_API_KEY_SECRET_VERSION: ${{ vars.GOOGLE_API_KEY_SECRET_VERSION }}
-      OCR_SERVICE_TOKEN_SECRET_VERSION: ${{ vars.OCR_SERVICE_TOKEN_SECRET_VERSION }}
-      RUNTIME_SERVICE_ACCOUNT: ${{ vars.DOCUMENT_PROCESSOR_RUNTIME_SERVICE_ACCOUNT }}
-      BUILD_SERVICE_ACCOUNT: ${{ vars.DOCUMENT_PROCESSOR_BUILD_SERVICE_ACCOUNT }}
+      SUPABASE_URL_SECRET_VERSION: ${{ vars.SUPABASE_URL_SECRET_VERSION }}
+      SUPABASE_TRUSTED_ORIGIN_SECRET_VERSION: ${{ vars.SUPABASE_TRUSTED_ORIGIN_SECRET_VERSION }}
+      SUPABASE_PUBLISHABLE_KEY_SECRET_VERSION: ${{ vars.SUPABASE_PUBLISHABLE_KEY_SECRET_VERSION }}
+      SUPABASE_HIRING_READER_TOKEN_SECRET_VERSION: ${{ vars.SUPABASE_HIRING_READER_TOKEN_SECRET_VERSION }}
+      HIRING_AGENT_TOKEN_SECRET_VERSION: ${{ vars.HIRING_AGENT_TOKEN_SECRET_VERSION }}
+      HIRING_AGENT_CANARY_MERCHANT_ID: ${{ vars.HIRING_AGENT_CANARY_MERCHANT_ID }}
+      HIRING_AGENT_CANARY_CANDIDATE_ID: ${{ vars.HIRING_AGENT_CANARY_CANDIDATE_ID }}
+      HIRING_AGENT_CANARY_ROLE_ID: ${{ vars.HIRING_AGENT_CANARY_ROLE_ID }}
+      RUNTIME_SERVICE_ACCOUNT: ${{ vars.HIRING_AGENT_RUNTIME_SERVICE_ACCOUNT }}
+      BUILD_SERVICE_ACCOUNT: ${{ vars.HIRING_AGENT_BUILD_SERVICE_ACCOUNT }}
       ARTIFACT_REPOSITORY: ${{ vars.ARTIFACT_REPOSITORY }}
 
     steps:
@@ -92,18 +120,24 @@ jobs:
       - name: Validate production configuration
         run: |
           set -euo pipefail
-          for name in GOOGLE_API_KEY_SECRET_VERSION OCR_SERVICE_TOKEN_SECRET_VERSION; do
+          for name in GOOGLE_API_KEY_SECRET_VERSION SUPABASE_URL_SECRET_VERSION SUPABASE_TRUSTED_ORIGIN_SECRET_VERSION SUPABASE_PUBLISHABLE_KEY_SECRET_VERSION SUPABASE_HIRING_READER_TOKEN_SECRET_VERSION HIRING_AGENT_TOKEN_SECRET_VERSION; do
             if [[ ! "${!name:-}" =~ ^[1-9][0-9]*$ ]]; then
               echo "::error::$name must be a configured numeric Secret Manager version"
               exit 1
             fi
           done
+          for name in HIRING_AGENT_CANARY_MERCHANT_ID HIRING_AGENT_CANARY_CANDIDATE_ID HIRING_AGENT_CANARY_ROLE_ID; do
+            if [[ ! "${!name:-}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+              echo "::error::$name must be a configured canonical lowercase UUID"
+              exit 1
+            fi
+          done
           if [[ ! "$RUNTIME_SERVICE_ACCOUNT" =~ ^[^[:space:]@]+@[^[:space:]@]+\.iam\.gserviceaccount\.com$ ]]; then
-            echo "::error::DOCUMENT_PROCESSOR_RUNTIME_SERVICE_ACCOUNT must be a dedicated service-account email"
+            echo "::error::HIRING_AGENT_RUNTIME_SERVICE_ACCOUNT must be a dedicated service-account email"
             exit 1
           fi
           if [[ ! "$BUILD_SERVICE_ACCOUNT" =~ ^[^[:space:]@]+@[^[:space:]@]+\.iam\.gserviceaccount\.com$ ]]; then
-            echo "::error::DOCUMENT_PROCESSOR_BUILD_SERVICE_ACCOUNT must be a dedicated service-account email"
+            echo "::error::HIRING_AGENT_BUILD_SERVICE_ACCOUNT must be a dedicated service-account email"
             exit 1
           fi
           if [[ ! "$ARTIFACT_REPOSITORY" =~ ^[a-z][a-z0-9._-]{0,62}$ ]]; then
@@ -156,22 +190,22 @@ jobs:
           PROJECT_ID: ${{ steps.auth.outputs.project_id }}
         run: |
           set -euo pipefail
-          env_canary="services/document-processor/.env.release-hardening-canary"
-          creds_canary="services/document-processor/gha-creds-release-hardening-canary.json"
+          env_canary="services/hiring-agent/.env.release-hardening-canary"
+          creds_canary="services/hiring-agent/gha-creds-release-hardening-canary.json"
           trap 'rm -f "$env_canary" "$creds_canary"' EXIT
           : > "$env_canary"
           : > "$creds_canary"
-          upload_manifest="$(cd services/document-processor && gcloud meta list-files-for-upload)"
+          upload_manifest="$(cd services/hiring-agent && gcloud meta list-files-for-upload)"
           if grep -Eq '(^|/)(\.env[^/]*|gha-creds-[^/]*\.json)$' <<<"$upload_manifest"; then
             echo "::error::Cloud Build source archive includes an environment or generated OIDC credential file"
             exit 1
           fi
-          image_name="$REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REPOSITORY/teamflow-document-processor"
+          image_name="$REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REPOSITORY/teamflow-hiring-agent"
           image_tag="$image_name:git-$GITHUB_SHA-run-$GITHUB_RUN_ATTEMPT"
-          gcloud builds submit services/document-processor \
+          gcloud builds submit services/hiring-agent \
             --project "$PROJECT_ID" \
             --region "$REGION" \
-            --config services/document-processor/cloudbuild.release.yaml \
+            --config services/hiring-agent/cloudbuild.release.yaml \
             --service-account "projects/$PROJECT_ID/serviceAccounts/$BUILD_SERVICE_ACCOUNT" \
             --substitutions "_IMAGE_URI=$image_tag" \
             --format=json > /tmp/cloud-build.json
@@ -228,7 +262,7 @@ jobs:
         id: deploy
         uses: google-github-actions/deploy-cloudrun@2028e2d7d30a78c6910e0632e48dd561b064884d # v3.0.1
         with:
-          service: teamflow-python-service
+          service: teamflow-hiring-agent
           region: us-central1
           project_id: ${{ steps.auth.outputs.project_id }}
           image: ${{ steps.artifact.outputs.image_ref }}
@@ -239,23 +273,45 @@ jobs:
           secrets_update_strategy: overwrite
           flags: >-
             --cpu=1 --memory=1Gi --min-instances=0 --max-instances=10
-            --port=8080 --timeout=60 --concurrency=2
+            --port=8080 --timeout=60 --concurrency=4
             --startup-probe=httpGet.path=/ready,httpGet.port=8080,initialDelaySeconds=0,failureThreshold=12,timeoutSeconds=5,periodSeconds=5
             --liveness-probe=httpGet.path=/health,httpGet.port=8080,initialDelaySeconds=30,failureThreshold=3,timeoutSeconds=5,periodSeconds=10
             --execution-environment=gen2 --service-account=${{ env.RUNTIME_SERVICE_ACCOUNT }}
           env_vars: |
-            MOCK_MODE=False
-            OCR_TIMEOUT_SECONDS=25
-            EMBEDDING_TIMEOUT_SECONDS=10
             ENVIRONMENT=production
-            DOCUMENT_PROCESSOR_OTEL_SERVICE_NAME=teamflow-document-processor
-            OTEL_SERVICE_NAME=teamflow-document-processor
+            HIRING_AGENT_MODEL=gemini-3.7-flash
+            HIRING_AGENT_FALLBACK_MODEL=gemini-3.6-flash
+            HIRING_AGENT_MAX_TOOL_ROUNDS=2
+            HIRING_AGENT_MAX_TOOL_CALLS_PER_ROUND=3
+            HIRING_AGENT_MODEL_TIMEOUT_SECONDS=12
+            HIRING_AGENT_TIMEOUT_SECONDS=45
+            HIRING_AGENT_MAX_CONCURRENCY=4
+            HIRING_AGENT_QUEUE_TIMEOUT_SECONDS=1
+            HIRING_AGENT_MAX_REQUEST_BYTES=65536
+            HIRING_AGENT_MOCK_TOOLS=false
+            AGENT_ALLOW_WRITES=false
+            TEAMFLOW_HITL_ENABLED=false
+            TEAMFLOW_HITL_DB_MIN_POOL_SIZE=1
+            TEAMFLOW_HITL_DB_MAX_POOL_SIZE=4
+            TEAMFLOW_CHECKPOINT_MIN_POOL_SIZE=1
+            TEAMFLOW_CHECKPOINT_MAX_POOL_SIZE=2
+            TEAMFLOW_HITL_AUTH_TIMEOUT_SECONDS=5
+            TEAMFLOW_HITL_MAX_CONCURRENCY=4
+            TEAMFLOW_HITL_QUEUE_TIMEOUT_SECONDS=1
+            TEAMFLOW_HITL_START_TIMEOUT_SECONDS=45
+            TEAMFLOW_HITL_DECISION_TIMEOUT_SECONDS=15
+            TEAMFLOW_HITL_INSPECT_TIMEOUT_SECONDS=5
+            TEAMFLOW_HITL_MAX_DECISION_REQUEST_BYTES=524288
+            OTEL_SERVICE_NAME=teamflow-hiring-agent
             OTEL_PROPAGATORS=tracecontext
-            OTEL_TRACES_SAMPLER=parentbased_traceidratio
-            OTEL_TRACES_SAMPLER_ARG=0.1
+            GOOGLE_CLOUD_PROJECT=${{ steps.auth.outputs.project_id }}
           secrets: |
             GOOGLE_API_KEY=GOOGLE_API_KEY:${{ env.GOOGLE_API_KEY_SECRET_VERSION }}
-            OCR_SERVICE_TOKEN=OCR_SERVICE_TOKEN:${{ env.OCR_SERVICE_TOKEN_SECRET_VERSION }}
+            SUPABASE_URL=SUPABASE_URL:${{ env.SUPABASE_URL_SECRET_VERSION }}
+            SUPABASE_TRUSTED_ORIGIN=SUPABASE_TRUSTED_ORIGIN:${{ env.SUPABASE_TRUSTED_ORIGIN_SECRET_VERSION }}
+            SUPABASE_PUBLISHABLE_KEY=SUPABASE_PUBLISHABLE_KEY:${{ env.SUPABASE_PUBLISHABLE_KEY_SECRET_VERSION }}
+            SUPABASE_HIRING_READER_TOKEN=SUPABASE_HIRING_READER_TOKEN:${{ env.SUPABASE_HIRING_READER_TOKEN_SECRET_VERSION }}
+            HIRING_AGENT_TOKEN=HIRING_AGENT_TOKEN:${{ env.HIRING_AGENT_TOKEN_SECRET_VERSION }}
 
       - name: Verify candidate provenance
         id: provenance
@@ -314,44 +370,47 @@ jobs:
           CANDIDATE_URL: ${{ steps.provenance.outputs.candidate_url }}
         run: |
           set -euo pipefail
-          status="$(curl --silent --show-error --output /tmp/candidate-health.json --write-out '%{http_code}' \
+          health_status="$(curl --silent --show-error --output /tmp/candidate-health.json --write-out '%{http_code}' \
             --connect-timeout 5 --max-time 10 "$CANDIDATE_URL/health")"
-          [[ "$status" == "200" ]]
-          jq -e \
-            '.status == "ok" and .service == "teamflow-document-processor"' \
-            /tmp/candidate-health.json >/dev/null
+          version_status="$(curl --silent --show-error --output /tmp/candidate-version.json --write-out '%{http_code}' \
+            --connect-timeout 5 --max-time 10 "$CANDIDATE_URL/version")"
+          [[ "$health_status" == "200" ]]
+          [[ "$version_status" == "200" ]]
+          jq -e '.status == "ok"' /tmp/candidate-health.json >/dev/null
+          jq -e '.service == "teamflow-hiring-agent"' /tmp/candidate-version.json >/dev/null
 
-      - name: Run candidate authenticated extraction canary
+      - name: Run candidate authenticated hiring canary
         env:
           CANDIDATE_URL: ${{ steps.provenance.outputs.candidate_url }}
         run: |
           set -euo pipefail
-          fixture="services/document-processor/tests/fixtures/scanned-resume.pdf"
-          expected_sha="a362aca8a4ea07155fe7e824af762303cbb9f57c38beb5fa086ce0a8b8bef8a0"
-          actual_sha="$(sha256sum "$fixture" | cut -d' ' -f1)"
-          [[ "$actual_sha" == "$expected_sha" ]]
-          ocr_token="$(gcloud secrets versions access "$OCR_SERVICE_TOKEN_SECRET_VERSION" \
-            --secret=OCR_SERVICE_TOKEN)"
-          echo "::add-mask::$ocr_token"
-          trap 'unset ocr_token; rm -f /tmp/candidate-extraction.json' EXIT
-          status="$(curl --silent --show-error --output /tmp/candidate-extraction.json \
-            --write-out '%{http_code}' --connect-timeout 5 --max-time 50 \
+          agent_token="$(gcloud secrets versions access "$HIRING_AGENT_TOKEN_SECRET_VERSION" \
+            --secret=HIRING_AGENT_TOKEN)"
+          echo "::add-mask::$agent_token"
+          request_id="$(tr '[:upper:]' '[:lower:]' </proc/sys/kernel/random/uuid)"
+          jq -n \
+            --arg merchant "$HIRING_AGENT_CANARY_MERCHANT_ID" \
+            --arg candidate "$HIRING_AGENT_CANARY_CANDIDATE_ID" \
+            --arg role "$HIRING_AGENT_CANARY_ROLE_ID" \
+            --arg request "$request_id" \
+            '{merchantId:$merchant,candidateId:$candidate,roleId:$role,requestId:$request,operation:"review_candidate"}' \
+            >/tmp/candidate-hiring-request.json
+          trap 'unset agent_token; rm -f /tmp/candidate-hiring-request.json /tmp/candidate-hiring-response.json' EXIT
+          status="$(curl --silent --show-error --output /tmp/candidate-hiring-response.json \
+            --write-out '%{http_code}' --connect-timeout 5 --max-time 55 \
             --max-filesize 2097152 --request POST \
-            --header "X-OCR-Token: $ocr_token" \
-            --form "file=@${fixture};type=application/pdf" \
-            "$CANDIDATE_URL/extract")"
+            --header "X-Agent-Token: $agent_token" \
+            --header 'Content-Type: application/json' \
+            --data-binary @/tmp/candidate-hiring-request.json \
+            "$CANDIDATE_URL/invoke")"
           [[ "$status" == "200" ]]
-          jq -e --arg sha "$expected_sha" '
-            .schema_version == "1.0"
-            and .content_sha256 == $sha
-            and .document_id == ("doc-" + $sha)
+          jq -e --arg request "$request_id" '
+            .request_id == $request
             and .status == "complete"
-            and .mock == false
-            and .extraction_method == "gemini_vision"
-            and (.text | contains("Harbor Cafe"))
-            and (.source_blocks | length > 0)
-            and (.embedding | length == 768)
-          ' /tmp/candidate-extraction.json >/dev/null
+            and .write_status == "not_requested"
+            and (.tool_calls | index("get_candidate") != null)
+            and (.tool_calls | index("get_job_requirements") != null)
+          ' /tmp/candidate-hiring-response.json >/dev/null
 
       - name: Remove and verify candidate traffic tag
         id: candidate_tag
@@ -445,7 +504,7 @@ jobs:
         if: ${{ steps.smoke.outcome == 'success' }}
         run: |
           {
-            echo "### Document processor deployment"
+            echo "### Hiring-agent deployment"
             echo "- Revision: ${{ steps.provenance.outputs.candidate_revision }}"
             echo "- Image: ${{ steps.provenance.outputs.image_digest }}"
             echo "- Cloud Build: ${{ steps.artifact.outputs.build_id }}"

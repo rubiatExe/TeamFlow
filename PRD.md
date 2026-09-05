@@ -1,5 +1,10 @@
 # TeamFlow Product Requirements Document (PRD)
 
+> **Historical design note:** This document records the original product concept and is
+> not proof of the current implementation. Current working-tree model defaults are
+> recorded in `config/ai-model-contract.json`; implementation evidence and gaps are tracked in
+> `docs/resume-claim-evidence.md`.
+
 ## 1. Executive Summary
 **TeamFlow** is an AI-native hiring agent integrated into the Square ecosystem. It automates the "Screening & Scheduling" phase for SMB owners (cafes, retail, restaurants) who are drowning in unformatted applicant data.
 

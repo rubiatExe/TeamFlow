@@ -3,6 +3,7 @@ import {
   GoogleGenerativeAI,
   type GenerateContentResult,
 } from '@google/generative-ai';
+import { SpanStatusCode, trace, type Span } from '@opentelemetry/api';
 import type { CafeRole } from '../domain/roles';
 import {
   PARSER_OUTPUT_RESPONSE_SCHEMA,
@@ -66,28 +67,14 @@ type GeminiUsageMetadata = {
   candidatesTokenCount?: number;
 };
 
-type TraceSpan = {
-  setAttribute: (key: string, value: string | number | boolean) => void;
-  recordException: (error: Error) => void;
-  setStatus: (status: { code: number }) => void;
-  end: () => void;
-};
-
 async function withScorerSpan(
   attributes: Record<string, string | number | boolean>,
   operation: () => Promise<GenerateContentResult>
 ): Promise<GenerateContentResult> {
   const start = Date.now();
-  const moduleName = '@opentelemetry/api';
-  const otel = await import(moduleName).catch(() => null);
+  const tracer = trace.getTracer('teamflow.semantic_scorer', '1.0.0');
 
-  if (!otel) {
-    return operation();
-  }
-
-  const tracer = otel.trace.getTracer('teamflow.semantic_scorer', '1.0.0');
-
-  return tracer.startActiveSpan('score_resume', async (span: TraceSpan) => {
+  return tracer.startActiveSpan('score_resume', async (span: Span) => {
     try {
       for (const [key, value] of Object.entries(attributes)) {
         span.setAttribute(key, value);
@@ -99,11 +86,15 @@ async function withScorerSpan(
       span.setAttribute('gen_ai.usage.input_tokens', usage?.promptTokenCount ?? 0);
       span.setAttribute('gen_ai.usage.output_tokens', usage?.candidatesTokenCount ?? 0);
       span.setAttribute('teamflow.duration_ms', Date.now() - start);
+      span.setStatus({ code: SpanStatusCode.OK });
 
       return result;
     } catch (error) {
-      span.recordException(error as Error);
-      span.setStatus({ code: otel.SpanStatusCode.ERROR });
+      span.setAttribute(
+        'error.type',
+        error instanceof Error ? error.name : 'UnknownError',
+      );
+      span.setStatus({ code: SpanStatusCode.ERROR });
       throw error;
     } finally {
       span.end();
@@ -316,7 +307,7 @@ function logScorerFailure(
 }
 
 /**
- * Step 2 of the pipeline — call Agent 2 (Gemini Model) to semantically score candidate against role.
+ * Structured scoring stage — score a candidate against a role with Gemini.
  * Accepts only markdown text. Raw files stay inside the OCR layer.
  */
 export async function callScorerAgent(
@@ -341,7 +332,7 @@ This candidate submitted a web application rather than a traditional resume. Pay
 - Evaluate their communication skills based on how they wrote their answers.
 ` : '';
 
-  const prompt = `You are TeamFlow Agent 2 — an expert AI hiring assistant for specialty cafes and restaurants.
+  const prompt = `You are TeamFlow's structured scoring engine for specialty cafes and restaurants.
 Evaluate the candidate's application for the position of "${role.title}".
 
 ROLE CRITERIA TO EVALUATE:

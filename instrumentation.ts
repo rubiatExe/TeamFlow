@@ -1,3 +1,8 @@
+// TeamFlow crosses a browser/Next/Python trust boundary. Only W3C traceparent
+// and tracestate are allowed to cross it; baggage is intentionally excluded so
+// request-controlled metadata cannot become an ambient cross-service channel.
+export const TEAMFLOW_OTEL_PROPAGATORS = ['tracecontext'] as const;
+
 export async function register() {
   if (process.env.NEXT_RUNTIME !== 'nodejs') {
     return;
@@ -34,7 +39,7 @@ export async function register() {
           }
         : {}),
     },
-    propagators: ['tracecontext', 'baggage'],
+    propagators: [...TEAMFLOW_OTEL_PROPAGATORS],
     traceSampler: 'parentbased_traceidratio',
     instrumentationConfig: {
       fetch: {

@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.git/
+.env*
+gha-creds-*.json
+cloudbuild*.yaml
+tests/
+requirements-dev.txt
+requirements-dev.lock

@@ -33,10 +33,13 @@ export async function withTraceSpan<T>(
     span.setAttributes(attributes);
 
     try {
-      return await operation();
+      const result = await operation();
+      span.setStatus({ code: SpanStatusCode.OK });
+      return result;
     } catch (error) {
-      span.recordException(
-        error instanceof Error ? error : new Error(String(error)),
+      span.setAttribute(
+        'error.type',
+        error instanceof Error ? error.name : 'UnknownError',
       );
       span.setStatus({ code: SpanStatusCode.ERROR });
       throw error;

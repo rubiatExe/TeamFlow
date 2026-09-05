@@ -1,0 +1,45 @@
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker:latest@sha256:d1797996867921778f1adbb7e493baaaf2f6b21e107599c0aab48c2ec06ff311
+    args:
+      - build
+      - --tag
+      - ${_IMAGE_URI}
+      - .
+
+  - id: scan
+    name: gcr.io/google.com/cloudsdktool/google-cloud-cli:582.0.0-slim@sha256:14026c08cf391812086012d6c5f14078221ce1b46be0df419f7f31ec9f69c712
+    entrypoint: bash
+    args:
+      - -euo
+      - pipefail
+      - -c
+      - |
+        gcloud artifacts docker images scan "${_IMAGE_URI}" \
+          --location=us \
+          --format='value(response.scan)' > /workspace/scan-id.txt
+
+  - id: reject-high-severity-vulnerabilities
+    name: gcr.io/google.com/cloudsdktool/google-cloud-cli:582.0.0-slim@sha256:14026c08cf391812086012d6c5f14078221ce1b46be0df419f7f31ec9f69c712
+    entrypoint: bash
+    args:
+      - -euo
+      - pipefail
+      - -c
+      - |
+        test -s /workspace/scan-id.txt
+        gcloud artifacts docker images list-vulnerabilities "$(cat /workspace/scan-id.txt)" \
+          --format='value(vulnerability.effectiveSeverity)' > /workspace/vulnerabilities.txt
+        if grep -Eq '^(HIGH|CRITICAL)$' /workspace/vulnerabilities.txt; then
+          echo "Release image contains HIGH or CRITICAL vulnerabilities"
+          exit 1
+        fi
+
+images:
+  - ${_IMAGE_URI}
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  requestedVerifyOption: VERIFIED
+
+timeout: 1800s

@@ -9,7 +9,8 @@ if (!apiKey) {
     console.warn("GOOGLE_API_KEY is not set in environment variables.");
 }
 const genAI = apiKey && apiKey !== "MOCK_KEY" ? new GoogleGenerativeAI(apiKey) : null;
-const model = genAI?.getGenerativeModel({ model: "gemini-1.5-pro" });
+const legacyModelName = process.env.SCORER_MODEL || 'gemini-3.1-pro-preview';
+const model = genAI?.getGenerativeModel({ model: legacyModelName });
 
 
 

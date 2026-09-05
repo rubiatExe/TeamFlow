@@ -16,27 +16,30 @@ It has two main experiences:
 
 ## What happens when a manager uploads a resume
 1. The system receives the resume file.
-2. It sends the file to an AI service called Gemini.
-3. Gemini reads the resume and returns structured information such as:
+2. The document service validates the bytes and extracts complete digital PDFs with
+   deterministic `pypdf`; scanned, mixed, or image documents use Gemini transcription.
+3. A separate scorer validates structured analysis such as:
    - candidate name
    - email
    - phone number
    - location
    - relevant skills
    - estimated experience
-   - a suitability score
+   - a suitability score and supporting analysis
 4. The candidate is added to the dashboard with the AI score and any potential red flags.
 
 ## What happens when a manager invites a candidate
 - The manager can send a magic link to the candidate via SMS.
-- The magic link contains a secure token that allows the candidate to open the application form without creating an account.
+- The demo magic link carries token-shaped data so the candidate can open the prototype
+  form without creating an account. Production signature verification and route
+  authorization are not complete.
 - The candidate portal is personalized with the store name and the selected job role.
 
 ## What the candidate sees
 The candidate application is a simple, guided flow:
 1. Welcome screen with the store name and role.
 2. Basic contact information and role selection.
-3. A small set of knockout questions to confirm key requirements (for example, age or availability).
+3. A small set of knockout questions to confirm job-related requirements (for example, work eligibility or availability).
 4. Availability and schedule preferences.
 5. Skills and experience questions.
 6. Motivation questions to understand why the candidate wants the job.
@@ -45,7 +48,7 @@ The candidate application is a simple, guided flow:
 ## Why this matters
 - Managers can quickly review resumes without manually reading every document.
 - The AI helps surface the strongest candidates first.
-- Candidates get a fast, no-login application experience.
+- Candidates get a short, no-login prototype application experience.
 - Instead of email threads and attachments, everything is handled in one streamlined system.
 
 ## Why this is different for cafés
@@ -53,8 +56,11 @@ TeamFlow is designed specifically for cafés, restaurants, and other hourly serv
 - It focuses on the hires cafés need most, such as baristas, line cooks, and shift leads.
 - It uses role-specific hiring criteria, so the AI evaluates candidates against real café requirements like weekend availability, food handling, and customer service.
 - It removes the need for bulky paper resumes and long application forms, making it easier for busy candidates to apply quickly.
-- Managers can invite candidates directly by SMS with a magic link, which increases response rates from walk-in and mobile-first applicants.
-- The system helps cafés hire faster by turning fragmented hiring tasks into one simple workflow.
+- Managers can invite candidates directly by SMS with a demo magic link, which is intended
+  to reduce friction for walk-in and mobile-first applicants; no response-rate experiment
+  is claimed.
+- The system is intended to streamline fragmented hiring tasks into one workflow; no
+  time-to-hire measurement is claimed.
 
 ## Technical note for non-technical users
 - The project is built with a website framework called Next.js.
