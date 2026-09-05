@@ -15,6 +15,7 @@ UUID_SCHEMA = {
         r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
     ),
 }
+DOCUMENT_ID_SCHEMA = {"type": "string", "pattern": r"^doc-[0-9a-f]{64}$"}
 ANNOTATIONS = {
     "readOnlyHint": True,
     "destructiveHint": False,
@@ -45,6 +46,24 @@ TOOLS = [
         "annotations": ANNOTATIONS,
     },
     {
+        "name": "get_resume_document",
+        "description": "Read one scoped resume snapshot.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "document_id": DOCUMENT_ID_SCHEMA,
+                "merchant_id": UUID_SCHEMA,
+                "candidate_id": {
+                    "anyOf": [UUID_SCHEMA, {"type": "null"}],
+                    "default": None,
+                },
+            },
+            "required": ["document_id", "merchant_id"],
+            "additionalProperties": False,
+        },
+        "annotations": ANNOTATIONS,
+    },
+    {
         "name": "list_candidates",
         "description": "List scoped candidates.",
         "inputSchema": {
@@ -57,6 +76,20 @@ TOOLS = [
                     "default": "",
                 },
                 "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 10},
+            },
+            "required": ["merchant_id"],
+            "additionalProperties": False,
+        },
+        "annotations": ANNOTATIONS,
+    },
+    {
+        "name": "load_active_role_policies",
+        "description": "Read the scoped role policy catalog.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "merchant_id": UUID_SCHEMA,
+                "limit": {"type": "integer", "minimum": 1, "maximum": 5, "default": 5},
             },
             "required": ["merchant_id"],
             "additionalProperties": False,

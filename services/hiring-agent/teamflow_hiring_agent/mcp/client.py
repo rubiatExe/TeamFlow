@@ -53,11 +53,14 @@ MCP_CHILD_ENVIRONMENT_KEYS = frozenset(
 MCP_TOOL_NAMES = (
     "get_candidate",
     "get_job_requirements",
+    "get_resume_document",
     "list_candidates",
+    "load_active_role_policies",
     "semantic_search_candidates",
 )
 
 _UUID_PROPERTY = {"type": "string", "pattern": _UUID_PATTERN}
+_DOCUMENT_ID_PROPERTY = {"type": "string", "pattern": r"^doc-[0-9a-f]{64}$"}
 _EXPECTED_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
     "get_candidate": {
         "type": "object",
@@ -77,6 +80,19 @@ _EXPECTED_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
         "required": ["role_id", "merchant_id"],
         "additionalProperties": False,
     },
+    "get_resume_document": {
+        "type": "object",
+        "properties": {
+            "document_id": _DOCUMENT_ID_PROPERTY,
+            "merchant_id": _UUID_PROPERTY,
+            "candidate_id": {
+                "anyOf": [_UUID_PROPERTY, {"type": "null"}],
+                "default": None,
+            },
+        },
+        "required": ["document_id", "merchant_id"],
+        "additionalProperties": False,
+    },
     "list_candidates": {
         "type": "object",
         "properties": {
@@ -87,6 +103,15 @@ _EXPECTED_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
                 "default": "",
             },
             "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 10},
+        },
+        "required": ["merchant_id"],
+        "additionalProperties": False,
+    },
+    "load_active_role_policies": {
+        "type": "object",
+        "properties": {
+            "merchant_id": _UUID_PROPERTY,
+            "limit": {"type": "integer", "minimum": 1, "maximum": 5, "default": 5},
         },
         "required": ["merchant_id"],
         "additionalProperties": False,
@@ -110,7 +135,9 @@ _EXPECTED_SCHEMA_JSON = {
 _APPLICATION_TOOL_DESCRIPTIONS = {
     "get_candidate": "Read one merchant-scoped candidate evidence record by identifier.",
     "get_job_requirements": "Read one merchant-scoped role's hiring criteria by identifier.",
+    "get_resume_document": "Read one immutable merchant-scoped résumé extraction snapshot.",
     "list_candidates": "List bounded candidate statuses within one merchant.",
+    "load_active_role_policies": "Read the complete bounded active-role scoring catalog.",
     "semantic_search_candidates": "Search bounded candidate evidence within one merchant.",
 }
 

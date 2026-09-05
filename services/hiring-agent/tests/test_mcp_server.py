@@ -23,6 +23,8 @@ from teamflow_hiring_agent.mcp.client import (
     _validated_raw_catalog,
 )
 from teamflow_hiring_agent.prompts import project_candidate_context, project_role_context
+from teamflow_hiring_agent.resume_review.contracts import RoleScoringPolicy
+from teamflow_hiring_agent.resume_review.workflow_contracts import StoredDocumentExtraction
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 MERCHANT_ID = "00000000-0000-0000-0000-000000000001"
@@ -100,7 +102,7 @@ def test_catalog_rejects_boolean_integer_arguments() -> None:
 
 
 def test_real_stdio_session_returns_usable_context_and_fails_mock_search_closed() -> None:
-    async def exercise_server() -> tuple[object, object, object, object]:
+    async def exercise_server() -> tuple[object, object, object, object, object, object]:
         connection = MCPStdioConnection(
             command=sys.executable,
             args=("-m", "teamflow_hiring_agent.mcp.server"),
@@ -122,18 +124,33 @@ def test_real_stdio_session_returns_usable_context_and_fails_mock_search_closed(
             searched = await tools["semantic_search_candidates"].ainvoke(
                 {"query": "espresso experience", "merchant_id": MERCHANT_ID}
             )
-            return candidate, role, listed, searched
+            document = await tools["get_resume_document"].ainvoke(
+                {
+                    "document_id": f"doc-{'a' * 64}",
+                    "merchant_id": MERCHANT_ID,
+                    "candidate_id": None,
+                }
+            )
+            policies = await tools["load_active_role_policies"].ainvoke(
+                {"merchant_id": MERCHANT_ID, "limit": 5}
+            )
+            return candidate, role, listed, searched, document, policies
 
-    candidate, role, listed, searched = asyncio.run(exercise_server())
+    candidate, role, listed, searched, document, policies = asyncio.run(exercise_server())
     candidate = _jsonable_tool_result(candidate)
     role = _jsonable_tool_result(role)
     listed = _jsonable_tool_result(listed)
     searched = _jsonable_tool_result(searched)
+    document = _jsonable_tool_result(document)
+    policies = _jsonable_tool_result(policies)
 
     assert listed == {"error": "Candidate listing is unavailable in mock mode"}
     assert searched == {"error": "Candidate search is unavailable in mock mode"}
     assert project_candidate_context(candidate, merchant_id=MERCHANT_ID) is not None
     assert project_role_context(role, merchant_id=MERCHANT_ID) is not None
+    assert StoredDocumentExtraction.model_validate(document).merchant_id == MERCHANT_ID
+    assert len(policies) == 1
+    assert RoleScoringPolicy.model_validate(policies[0]).role_title == "Barista"
 
 
 def test_mock_search_error_degrades_the_real_stdio_graph() -> None:

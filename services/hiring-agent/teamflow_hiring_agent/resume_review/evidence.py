@@ -68,12 +68,16 @@ _DECISION_DIRECTIVE_VERBS = frozenset(
     {
         "accept",
         "acknowledge",
+        "allow",
+        "approve",
         "classify",
         "consider",
         "count",
         "credit",
         "deem",
         "evaluate",
+        "give",
+        "grant",
         "judge",
         "mark",
         "recognize",
@@ -89,6 +93,40 @@ _DIRECTIVE_PREFIXES = (
     ("kindly",),
     ("you", "should"),
     ("you", "must"),
+)
+_DIRECTIVE_SUBJECT_TERMS = frozenset(
+    {
+        "agent",
+        "assessor",
+        "evaluator",
+        "model",
+        "reviewer",
+        "system",
+        "you",
+    }
+)
+_DIRECTIVE_MODAL_TERMS = frozenset({"may", "must", "should"})
+_DIRECTIVE_PASSIVE_VERBS = frozenset(
+    {
+        "accepted",
+        "acknowledged",
+        "allowed",
+        "approved",
+        "classified",
+        "considered",
+        "counted",
+        "credited",
+        "deemed",
+        "evaluated",
+        "granted",
+        "judged",
+        "marked",
+        "recognized",
+        "recorded",
+        "regarded",
+        "treated",
+        "viewed",
+    }
 )
 
 
@@ -169,6 +207,28 @@ def _known_status_quote_contains_criterion_directive(
         return True
 
     quote_tokens = _lexical_tokens(quote)
+    for index, token in enumerate(quote_tokens):
+        if token not in _DIRECTIVE_MODAL_TERMS:
+            continue
+        nearby = quote_tokens[index + 1 : index + 5]
+        if any(word in _DECISION_DIRECTIVE_VERBS for word in nearby) or (
+            nearby[:1] == ("be",) and any(word in _DIRECTIVE_PASSIVE_VERBS for word in nearby[1:])
+        ):
+            return True
+
+    # A decision-making subject followed by a directive verb is still an
+    # instruction when prose is padded before the modal (for example, "the
+    # reviewer should accept ..."). This is deliberately evaluated only for a
+    # known-status quote that already overlaps the configured criterion.
+    for index, token in enumerate(quote_tokens[:-1]):
+        if token not in _DIRECTIVE_SUBJECT_TERMS:
+            continue
+        nearby = quote_tokens[index + 1 : index + 6]
+        if any(word in _DIRECTIVE_MODAL_TERMS for word in nearby) and any(
+            word in _DECISION_DIRECTIVE_VERBS for word in nearby
+        ):
+            return True
+
     for prefix in _DIRECTIVE_PREFIXES:
         if quote_tokens[: len(prefix)] == prefix:
             quote_tokens = quote_tokens[len(prefix) :]
@@ -290,13 +350,11 @@ def validate_agent1_evidence(
                         "known-status evidence has no distinctive lexical overlap "
                         "with its criterion"
                     )
-                if (
-                    assessment.status is CriterionStatus.MET
-                    and _met_quote_obviously_negates_criterion(
-                        evidence.exact_quote,
-                        criterion.criterion_text,
-                    )
-                ):
+                has_explicit_negation = _met_quote_obviously_negates_criterion(
+                    evidence.exact_quote,
+                    criterion.criterion_text,
+                )
+                if assessment.status is CriterionStatus.MET and has_explicit_negation:
                     raise EvidenceValidationError(
                         "met evidence explicitly negates its configured criterion"
                     )

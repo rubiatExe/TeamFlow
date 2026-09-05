@@ -9,6 +9,7 @@ fails closed and exposes the exact catalog pinned by the application-side adapte
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import math
 import os
@@ -24,8 +25,13 @@ from fastmcp import FastMCP
 from google.genai.types import EmbedContentConfig, HttpOptions, HttpRetryOptions
 from mcp.types import ToolAnnotations
 from opentelemetry import trace
-from pydantic import Field, Strict
+from pydantic import Field, Strict, ValidationError
 
+from ..resume_review.contracts import RoleScoringPolicy
+from ..resume_review.workflow_contracts import (
+    StoredDocumentExtraction,
+    canonical_snapshot_sha256,
+)
 from ..security import (
     contains_instructional_manipulation,
     contains_sensitive_text,
@@ -54,8 +60,10 @@ _EMBEDDING_TIMEOUT_SECONDS = 4.0
 _EMBEDDING_HTTP_TIMEOUT_MS = 3_500
 
 DatabaseId = Annotated[str, Strict(), Field(pattern=_UUID_PATTERN)]
+DocumentId = Annotated[str, Strict(), Field(pattern=r"^doc-[0-9a-f]{64}$")]
 SearchQuery = Annotated[str, Strict(), Field(min_length=1, max_length=4_000)]
 CandidateLimit = Annotated[int, Strict(), Field(ge=1, le=20)]
+ActiveRoleLimit = Annotated[int, Strict(), Field(ge=1, le=5)]
 SimilarityThreshold = Annotated[float, Strict(), Field(ge=0, le=1)]
 CandidateStatus = Literal["", "new", "invited", "interviewed", "hired", "rejected"]
 
@@ -355,7 +363,12 @@ def _project_search_results(
 async def _supabase_get(
     settings: _ServerSettings,
     *,
-    table: Literal["jobs", "candidates"],
+    table: Literal[
+        "jobs",
+        "candidates",
+        "resume_documents",
+        "candidate_resume_documents",
+    ],
     query_params: str,
 ) -> list[dict[str, Any]]:
     response = await settings.supabase_client(timeout_seconds=_READ_TIMEOUT_SECONDS).request_json(
@@ -367,6 +380,98 @@ async def _supabase_get(
     ):
         raise RuntimeError("hiring_data_response_invalid")
     return response.payload
+
+
+def _project_resume_document(
+    row: dict[str, Any],
+    *,
+    merchant_id: str,
+    document_id: str,
+) -> dict[str, Any] | None:
+    """Validate the complete immutable snapshot before exposing private text."""
+
+    if row.get("merchant_id") != merchant_id or row.get("document_id") != document_id:
+        return None
+    try:
+        document = StoredDocumentExtraction.model_validate(row)
+    except (TypeError, ValueError, ValidationError):
+        return None
+    return document.model_dump(mode="json")
+
+
+def _project_active_role_policies(
+    rows: list[dict[str, Any]],
+    *,
+    merchant_id: str,
+    maximum: int,
+) -> list[dict[str, Any]] | None:
+    """Convert database rows into an exact, bounded application-owned contract."""
+
+    if len(rows) > maximum:
+        return None
+    policies: list[RoleScoringPolicy] = []
+    try:
+        for row in rows:
+            if row.get("merchant_id") != merchant_id:
+                return None
+            policies.append(
+                RoleScoringPolicy.model_validate(
+                    {
+                        "schema_version": "1.0",
+                        "role_id": row.get("id"),
+                        "role_title": row.get("title"),
+                        "policy_identity": {
+                            "policy_id": row.get("scoring_policy_id"),
+                            "policy_version": row.get("scoring_policy_version"),
+                        },
+                        "criteria": row.get("scoring_criteria"),
+                    }
+                )
+            )
+    except (TypeError, ValueError, ValidationError):
+        return None
+    if len({policy.role_id for policy in policies}) != len(policies):
+        return None
+    policies.sort(key=lambda policy: policy.role_id)
+    return [policy.model_dump(mode="json") for policy in policies]
+
+
+def _mock_resume_document(merchant_id: str, document_id: str) -> dict[str, Any]:
+    """Build one internally consistent test snapshot without live credentials."""
+
+    content_sha256 = document_id.removeprefix("doc-")
+    text = "Prepared espresso equipment and served cafe guests."
+    block_digest = hashlib.sha256(f"1|1|{text}".encode()).hexdigest()[:12]
+    payload: dict[str, Any] = {
+        "schema_version": "1.0",
+        "merchant_id": merchant_id,
+        "document_id": document_id,
+        "content_sha256": content_sha256,
+        "status": "complete",
+        "text": text,
+        "source_blocks": [
+            {
+                "source_block_id": (f"src-{content_sha256[:12]}-p0001-b0001-{block_digest}"),
+                "page_number": 1,
+                "ordinal": 1,
+                "text": text,
+            }
+        ],
+        "extraction_method": "pdf_text",
+        "model_id": "teamflow-mcp-mock",
+        "embedding_available": True,
+        "mock": False,
+        "warnings": [],
+        "quality": {
+            "assessment": "usable",
+            "character_count": len(text),
+            "block_count": 1,
+            "page_count": 1,
+            "reason_codes": [],
+        },
+    }
+    payload["snapshot_sha256"] = canonical_snapshot_sha256(payload)
+    return StoredDocumentExtraction.model_validate(payload).model_dump(mode="json")
 
 
 async def _match_candidates(
@@ -576,6 +681,79 @@ async def get_candidate(candidate_id: DatabaseId, merchant_id: DatabaseId) -> di
 
 
 @mcp.tool(annotations=_READ_ONLY_ANNOTATIONS, output_schema=None)
+async def get_resume_document(
+    document_id: DocumentId,
+    merchant_id: DatabaseId,
+    candidate_id: DatabaseId | None = None,
+) -> dict[str, Any]:
+    """Fetch one immutable extraction through a merchant-bound composite key."""
+
+    with tracer.start_as_current_span(
+        "mcp.get_resume_document",
+        record_exception=False,
+        set_status_on_exception=False,
+    ) as span:
+        normalized_merchant_id, error = _validated_uuid(merchant_id, "merchant_id")
+        if error:
+            return error
+        assert normalized_merchant_id is not None
+        normalized_candidate_id: str | None = None
+        if candidate_id is not None:
+            normalized_candidate_id, error = _validated_uuid(candidate_id, "candidate_id")
+            if error:
+                return error
+
+        settings = _settings_for(normalized_merchant_id)
+        if settings is None:
+            return _configuration_error()
+        if settings.mock_tools:
+            return _mock_resume_document(normalized_merchant_id, document_id)
+
+        try:
+            async with asyncio.timeout(_TOOL_DEADLINE_SECONDS):
+                if normalized_candidate_id is not None:
+                    links = await _supabase_get(
+                        settings,
+                        table="candidate_resume_documents",
+                        query_params=(
+                            f"merchant_id=eq.{normalized_merchant_id}"
+                            f"&candidate_id=eq.{normalized_candidate_id}"
+                            f"&document_id=eq.{document_id}&select=document_id&limit=2"
+                        ),
+                    )
+                    if len(links) != 1 or links[0].get("document_id") != document_id:
+                        span.set_attribute("teamflow.not_found", True)
+                        return {"error": "Document not found"}
+                rows = await _supabase_get(
+                    settings,
+                    table="resume_documents",
+                    query_params=(
+                        f"merchant_id=eq.{normalized_merchant_id}"
+                        f"&document_id=eq.{document_id}"
+                        "&select=schema_version,merchant_id,document_id,content_sha256,"
+                        "snapshot_sha256,status,text,source_blocks,extraction_method,model_id,"
+                        "embedding_available,mock,warnings,quality&limit=2"
+                    ),
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Resume document read failed with %s", type(exc).__name__)
+            return _unavailable_error()
+        if not rows:
+            span.set_attribute("teamflow.not_found", True)
+            return {"error": "Document not found"}
+        if len(rows) != 1:
+            return _unavailable_error()
+        projected = _project_resume_document(
+            rows[0],
+            merchant_id=normalized_merchant_id,
+            document_id=document_id,
+        )
+        return projected if projected is not None else _unavailable_error()
+
+
+@mcp.tool(annotations=_READ_ONLY_ANNOTATIONS, output_schema=None)
 async def list_candidates(
     merchant_id: DatabaseId,
     status_filter: CandidateStatus = "",
@@ -628,6 +806,77 @@ async def list_candidates(
             maximum=limit,
         )
         return projected if projected is not None else _unavailable_error()
+
+
+@mcp.tool(annotations=_READ_ONLY_ANNOTATIONS, output_schema=None)
+async def load_active_role_policies(
+    merchant_id: DatabaseId,
+    limit: ActiveRoleLimit = 5,
+) -> list[dict[str, Any]] | dict[str, str]:
+    """Fetch the complete configured active-role catalog without truncation."""
+
+    with tracer.start_as_current_span(
+        "mcp.load_active_role_policies",
+        record_exception=False,
+        set_status_on_exception=False,
+    ) as span:
+        normalized_merchant_id, error = _validated_uuid(merchant_id, "merchant_id")
+        if error:
+            return error
+        assert normalized_merchant_id is not None
+        if not 1 <= limit <= 5:
+            return {"error": "limit must be between 1 and 5"}
+
+        settings = _settings_for(normalized_merchant_id)
+        if settings is None:
+            return _configuration_error()
+        if settings.mock_tools:
+            return [
+                {
+                    "schema_version": "1.0",
+                    "role_id": "00000000-0000-0000-0000-000000000010",
+                    "role_title": "Barista",
+                    "policy_identity": {
+                        "policy_id": "barista-policy",
+                        "policy_version": "1.0.0",
+                    },
+                    "criteria": [
+                        {
+                            "criterion_id": "espresso-equipment",
+                            "criterion_text": "Espresso equipment experience",
+                            "weight": 100,
+                        }
+                    ],
+                }
+            ]
+
+        try:
+            async with asyncio.timeout(_TOOL_DEADLINE_SECONDS):
+                rows = await _supabase_get(
+                    settings,
+                    table="jobs",
+                    query_params=(
+                        f"merchant_id=eq.{normalized_merchant_id}&is_active=eq.true"
+                        "&select=id,merchant_id,title,scoring_policy_id,"
+                        "scoring_policy_version,scoring_criteria"
+                        f"&order=id.asc&limit={limit + 1}"
+                    ),
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Active-role catalog read failed with %s", type(exc).__name__)
+            return _unavailable_error()
+        projected = _project_active_role_policies(
+            rows,
+            merchant_id=normalized_merchant_id,
+            maximum=limit,
+        )
+        if projected is None:
+            span.set_attribute("teamflow.catalog_invalid", True)
+            return {"error": "Active role catalog is invalid or exceeds its limit"}
+        span.set_attribute("teamflow.active_role_count", len(projected))
+        return projected
 
 
 @mcp.tool(annotations=_READ_ONLY_ANNOTATIONS, output_schema=None)

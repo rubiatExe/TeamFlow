@@ -487,8 +487,10 @@ def create_resume_review_nodes(
                     decision = {
                         "agent2_context": context,
                         "agent2_ready": False,
-                        "review_required": False,
+                        "review_required": True,
+                        "status": ReviewStatus.REVIEW_REQUIRED,
                         "questions_status": QuestionsStatus.NOT_REQUIRED,
+                        "reason_codes": ["model_classification_requires_human_review"],
                     }
                 elif len(context.gaps) > 10:
                     decision = {
@@ -503,7 +505,9 @@ def create_resume_review_nodes(
                     decision = {
                         "agent2_context": context,
                         "agent2_ready": True,
-                        "review_required": False,
+                        "review_required": True,
+                        "status": ReviewStatus.REVIEW_REQUIRED,
+                        "reason_codes": ["model_classification_requires_human_review"],
                     }
 
         return {

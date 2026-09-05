@@ -228,7 +228,7 @@ def test_one_exact_read_only_catalog_is_loaded_per_invocation() -> None:
     assert all(call[0]["teamflow"]["env"] == expected_environment for call in factory.calls)
     assert all(session.initialize_count == session.list_count == 1 for session in sessions)
     assert all(manager.enter_count == manager.exit_count == 1 for manager in managers)
-    assert len(converter_calls) == 8
+    assert len(converter_calls) == 12
     assert all(call["server_name"] == "teamflow" for call in converter_calls)
     assert all(call["tool_name_prefix"] is False for call in converter_calls)
     assert all(call["handle_tool_errors"] is False for call in converter_calls)

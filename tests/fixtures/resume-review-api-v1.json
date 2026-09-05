@@ -13,8 +13,8 @@
       "schema_version": "1.0",
       "request_id": "44444444-4444-4444-8444-444444444444",
       "document_id": "doc-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "status": "complete",
-      "review_required": false,
+      "status": "review_required",
+      "review_required": true,
       "agent1_evaluation": {
         "schema_version": "1.0",
         "ranked_roles": [
@@ -111,7 +111,9 @@
       },
       "questions_status": "complete",
       "persistence_status": "not_requested",
-      "reason_codes": [],
+      "reason_codes": [
+        "model_classification_requires_human_review"
+      ],
       "extraction_status": "complete",
       "embedding_available": true
     }
@@ -121,8 +123,8 @@
       "schema_version": "1.0",
       "request_id": "44444444-4444-4444-8444-444444444444",
       "document_id": "doc-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "status": "degraded",
-      "review_required": false,
+      "status": "review_required",
+      "review_required": true,
       "agent1_evaluation": {
         "schema_version": "1.0",
         "ranked_roles": [
@@ -208,6 +210,7 @@
       "questions_status": "degraded",
       "persistence_status": "not_requested",
       "reason_codes": [
+        "model_classification_requires_human_review",
         "agent2_provider_failed"
       ],
       "extraction_status": "complete",

@@ -347,6 +347,10 @@ class ResumeReviewResponse(FrozenContract):
             self.agent1_evaluation is None
         ):
             raise ValueError("persistence cannot succeed without a validated evaluation")
+        if self.agent1_evaluation is not None and (
+            self.status is not ReviewStatus.REVIEW_REQUIRED or not self.review_required
+        ):
+            raise ValueError("model evaluations are unapproved review proposals")
         if len(self.reason_codes) != len(set(self.reason_codes)):
             raise ValueError("reason_codes must be unique")
         if self.status is ReviewStatus.REVIEW_REQUIRED and not self.review_required:
