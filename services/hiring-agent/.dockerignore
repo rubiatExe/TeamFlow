@@ -5,11 +5,27 @@
 !teamflow_hiring_agent/
 !teamflow_hiring_agent/**
 
-# Later services and offline evaluation code are separate deployment units.
+# Offline evaluation and the call-time-only compatibility adapter are separate units.
+# The production entry point imports the resume-review and HITL packages, so they
+# remain inside this explicit allowlist.
 teamflow_hiring_agent/api.py
 teamflow_hiring_agent/evaluation/
-teamflow_hiring_agent/resume_review/
+# Obsolete dedicated review server; the production image uses the shared six-tool
+# MCP server under teamflow_hiring_agent/mcp/server.py.
+teamflow_hiring_agent/resume_review/mcp_server.py
 
 # Never package generated Python artifacts.
 teamflow_hiring_agent/**/__pycache__/
 teamflow_hiring_agent/**/*.py[cod]
+
+# Keep local configuration, generated OIDC credentials, release controls, and
+# development-only material out even if the allowlist grows later.
+.env*
+**/.env*
+gha-creds-*.json
+**/gha-creds-*.json
+cloudbuild*.yaml
+**/cloudbuild*.yaml
+tests/
+requirements-dev.txt
+requirements-dev.lock

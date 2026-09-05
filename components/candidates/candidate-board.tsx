@@ -9,6 +9,7 @@ export type { CandidateStatus, CandidateWithStatus } from '@/lib/contracts/candi
 interface CandidateBoardProps {
     candidates: CandidateWithStatus[];
     onStatusChange?: (candidateId: string, newStatus: CandidateStatus) => void;
+    onInviteSuccess?: (candidateId: string) => void;
     onRemove?: (candidateId: string) => void;
 }
 
@@ -20,7 +21,7 @@ const columns: { key: CandidateStatus; label: string; color: string; bg: string 
     { key: 'hired', label: '✅ Hired', color: 'border-lime-500', bg: 'bg-lime-50' },
 ];
 
-export function CandidateBoard({ candidates, onStatusChange, onRemove }: CandidateBoardProps) {
+export function CandidateBoard({ candidates, onStatusChange, onInviteSuccess, onRemove }: CandidateBoardProps) {
     const getCandidatesByStatus = (status: CandidateStatus) => {
         return candidates
             .filter(c => c.status === status)
@@ -28,7 +29,7 @@ export function CandidateBoard({ candidates, onStatusChange, onRemove }: Candida
     };
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
             {columns.map(column => (
                 <div
                     key={column.key}
@@ -43,7 +44,7 @@ export function CandidateBoard({ candidates, onStatusChange, onRemove }: Candida
 
                     <div className="space-y-4 min-h-[200px]">
                         {getCandidatesByStatus(column.key).length === 0 ? (
-                            <div className="text-center text-stone-400 text-sm py-12">
+                            <div className="text-center text-stone-600 text-sm py-12">
                                 {column.key === 'pending' ? 'Upload resumes to start' :
                                     column.key === 'new' ? 'Candidates who completed portal' : 'No candidates yet'}
                             </div>
@@ -54,15 +55,16 @@ export function CandidateBoard({ candidates, onStatusChange, onRemove }: Candida
                                         candidateId={candidate.id}
                                         data={candidate.data}
                                         status={candidate.status}
-                                        onInvite={(id) => onStatusChange?.(id, 'invited')}
+                                        onInvite={onInviteSuccess}
                                     />
 
                                     {/* Remove Button — visible on hover at all stages */}
                                     {onRemove && (
                                         <button
+                                            type="button"
+                                            aria-label={`Remove ${candidate.data.candidate.name}`}
                                             onClick={() => onRemove(candidate.id)}
-                                            className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity w-7 h-7 flex items-center justify-center bg-white border border-stone-200 rounded-lg text-stone-400 hover:text-red-500 hover:border-red-300 hover:bg-red-50 shadow-sm cursor-pointer z-10"
-                                            title="Remove candidate"
+                                            className="absolute top-2 right-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 transition-opacity min-w-11 min-h-11 flex items-center justify-center bg-white border border-stone-300 rounded-lg text-stone-600 hover:text-red-700 hover:border-red-400 hover:bg-red-50 shadow-sm cursor-pointer z-10 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600"
                                         >
                                             ✕
                                         </button>
@@ -70,13 +72,18 @@ export function CandidateBoard({ candidates, onStatusChange, onRemove }: Candida
 
                                     {/* Status Change Dropdown */}
                                     {onStatusChange && column.key !== 'hired' && (
-                                        <div className="absolute top-3 right-12 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <div className="mt-3 opacity-100 md:absolute md:top-2 md:right-14 md:mt-0 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 transition-opacity">
+                                            <label htmlFor={`candidate-status-${candidate.id}`} className="sr-only">
+                                                Change status for {candidate.data.candidate.name}
+                                            </label>
                                             <select
-                                                className="text-xs bg-white border border-stone-200 rounded-lg px-2 py-1 text-stone-600 shadow-sm cursor-pointer hover:border-stone-300"
+                                                id={`candidate-status-${candidate.id}`}
+                                                aria-label={`Change status for ${candidate.data.candidate.name}`}
+                                                className="min-h-11 w-full md:w-auto text-xs bg-white border border-stone-300 rounded-lg px-2 py-1 text-stone-700 shadow-sm cursor-pointer hover:border-stone-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-600"
                                                 value={candidate.status}
                                                 onChange={(e) => onStatusChange(candidate.id, e.target.value as CandidateStatus)}
                                             >
-                                                {columns.map(col => (
+                                                {columns.filter(col => col.key !== 'invited' || candidate.status === 'invited').map(col => (
                                                     <option key={col.key} value={col.key}>
                                                         {col.label.replace(/^. /, '')}
                                                     </option>

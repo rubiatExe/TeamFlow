@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  InvalidRequestFramingError,
   InvalidJsonResponseError,
   readBoundedJson,
   readBoundedJsonResponse,
   RequestBodyDeadlineError,
   RequestBodyTooLargeError,
+  UnsupportedJsonMediaTypeError,
+  validateBoundedJsonRequestHeaders,
 } from '../../lib/http/bounded-json.ts';
 
 function chunkedRequest(chunks: string[]): Request {
@@ -29,6 +32,86 @@ test('reads valid chunked JSON without trusting Content-Length', async () => {
     64,
   );
   assert.deepEqual(result, { schema_version: '1.0' });
+});
+
+test('requires one canonical application/json request framing before body read', () => {
+  assert.doesNotThrow(() => validateBoundedJsonRequestHeaders({
+    headers: new Headers({
+      'Content-Type': 'application/json',
+      'Content-Length': '64',
+    }),
+  }, 64));
+
+  for (const contentType of [
+    null,
+    'application/json; charset=utf-8',
+    'Application/JSON',
+    'text/plain',
+  ]) {
+    const headers = new Headers();
+    if (contentType !== null) headers.set('Content-Type', contentType);
+    assert.throws(
+      () => validateBoundedJsonRequestHeaders({ headers }, 64),
+      UnsupportedJsonMediaTypeError,
+      String(contentType),
+    );
+  }
+
+  for (const contentLength of ['', '-1', '+2', '02', '2e0', '2, 2']) {
+    assert.throws(
+      () => validateBoundedJsonRequestHeaders({
+        headers: new Headers({
+          'Content-Type': 'application/json',
+          'Content-Length': contentLength,
+        }),
+      }, 64),
+      InvalidRequestFramingError,
+      contentLength,
+    );
+  }
+
+  assert.throws(
+    () => validateBoundedJsonRequestHeaders({
+      headers: new Headers({
+        'Content-Type': 'application/json',
+        'Content-Length': '2',
+        'Transfer-Encoding': 'chunked',
+      }),
+    }, 64),
+    InvalidRequestFramingError,
+  );
+  assert.throws(
+    () => validateBoundedJsonRequestHeaders({
+      headers: new Headers({
+        'Content-Type': 'application/json',
+        'Content-Length': '65',
+      }),
+    }, 64),
+    RequestBodyTooLargeError,
+  );
+});
+
+test('bounds empty stream frames and cancels the reader', async () => {
+  let canceled = false;
+  const request = new Request('http://teamflow.test/internal', {
+    method: 'POST',
+    body: new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array());
+      },
+      cancel() {
+        canceled = true;
+      },
+    }),
+    duplex: 'half',
+  } as RequestInit & { duplex: 'half' });
+
+  await assert.rejects(
+    readBoundedJson(request, 64),
+    InvalidRequestFramingError,
+  );
+  await new Promise<void>(resolve => setTimeout(resolve, 0));
+  assert.equal(canceled, true);
 });
 
 test('rejects a chunked body as soon as its actual bytes exceed the limit', async () => {

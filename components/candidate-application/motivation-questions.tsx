@@ -51,38 +51,45 @@ export function MotivationQuestions({ data, onChange, onNext, onBack, merchantNa
 
             {/* Why work here — role-specific */}
             <div>
-                <h3 className="text-base font-semibold text-stone-800 mb-2">
+                <label htmlFor="motivation-primary" className="block text-base font-semibold text-stone-800 mb-2">
                     {primaryMotivation?.question || `Why do you want to work at ${merchantName}?`}
-                </h3>
-                <p className="text-xs text-stone-400 mb-3">
+                </label>
+                <p id="motivation-primary-help" className="text-xs text-stone-500 mb-3">
                     Be yourself! We want to hear your voice.
                 </p>
                 <textarea
+                    id="motivation-primary"
+                    name="whyWorkHere"
+                    aria-describedby="motivation-primary-help motivation-primary-count"
+                    aria-required="true"
                     value={data.whyWorkHere}
                     onChange={(e) => onChange({ ...data, whyWorkHere: e.target.value })}
                     placeholder="I'm excited about this opportunity because..."
                     rows={4}
                     maxLength={maxChars}
-                    className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3 text-stone-700 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-lime-500/50 focus:border-lime-500 resize-none"
+                    className="w-full bg-stone-50 border border-stone-300 rounded-xl px-4 py-3 text-stone-800 placeholder:text-stone-500 focus:outline-none focus:ring-2 focus:ring-lime-600 focus:border-lime-600 resize-none"
                 />
                 <div className="flex justify-between mt-1">
-                    <span className={`text-xs ${charCount >= minChars ? 'text-lime-600' : 'text-stone-400'}`}>
+                    <span id="motivation-primary-count" className={`text-xs ${charCount >= minChars ? 'text-lime-700' : 'text-stone-500'}`}>
                         {charCount >= minChars ? '✓ Great!' : `${minChars - charCount} more characters needed`}
                     </span>
-                    <span className="text-xs text-stone-400">{charCount}/{maxChars}</span>
+                    <span className="text-xs text-stone-500">{charCount}/{maxChars}</span>
                 </div>
             </div>
 
             {/* Role-Specific Skill Question (scenario-based) */}
             {skillQs.filter(q => q.type === 'text').slice(0, 1).map(q => (
                 <div key={q.id}>
-                    <h3 className="text-base font-semibold text-stone-800 mb-2">
+                    <label htmlFor={`motivation-skill-${q.id}`} className="block text-base font-semibold text-stone-800 mb-2">
                         {q.question} 💭
-                    </h3>
-                    <p className="text-xs text-stone-400 mb-3">
+                    </label>
+                    <p id={`motivation-skill-${q.id}-help`} className="text-xs text-stone-500 mb-3">
                         Walk us through your thinking — there&apos;s no wrong answer.
                     </p>
                     <textarea
+                        id={`motivation-skill-${q.id}`}
+                        name={`skillAnswer-${q.id}`}
+                        aria-describedby={`motivation-skill-${q.id}-help motivation-skill-${q.id}-count`}
                         value={data.skillAnswers?.[q.id] || ''}
                         onChange={(e) => onChange({
                             ...data,
@@ -91,28 +98,30 @@ export function MotivationQuestions({ data, onChange, onNext, onBack, merchantNa
                         placeholder="Here's what I would do..."
                         rows={3}
                         maxLength={q.maxChars || 400}
-                        className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3 text-stone-700 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-lime-500/50 focus:border-lime-500 resize-none"
+                        className="w-full bg-stone-50 border border-stone-300 rounded-xl px-4 py-3 text-stone-800 placeholder:text-stone-500 focus:outline-none focus:ring-2 focus:ring-lime-600 focus:border-lime-600 resize-none"
                     />
                     <div className="text-right mt-1">
-                        <span className="text-xs text-stone-400">{(data.skillAnswers?.[q.id] || '').length}/{q.maxChars || 400}</span>
+                        <span id={`motivation-skill-${q.id}-count`} className="text-xs text-stone-500">{(data.skillAnswers?.[q.id] || '').length}/{q.maxChars || 400}</span>
                     </div>
                 </div>
             ))}
 
             {/* Superpower — role-specific */}
-            <div>
-                <h3 className="text-base font-semibold text-stone-800 mb-2">
+            <fieldset>
+                <legend className="text-base font-semibold text-stone-800 mb-2">
                     What&apos;s your superpower as a {role.title.toLowerCase()}? 🦸
-                </h3>
-                <p className="text-xs text-stone-400 mb-3">Pick the one that fits you best</p>
+                </legend>
+                <p className="text-xs text-stone-500 mb-3">Pick the one that fits you best</p>
                 <div className="space-y-2">
                     {superpowers.map(power => (
                         <button
                             key={power.id}
+                            type="button"
+                            aria-pressed={data.superpower === power.id}
                             onClick={() => onChange({ ...data, superpower: power.id })}
-                            className={`w-full p-3 rounded-xl text-left transition-all ${data.superpower === power.id
-                                ? 'bg-lime-100 border-2 border-lime-500'
-                                : 'bg-stone-50 border-2 border-stone-200 hover:border-stone-300'
+                            className={`w-full min-h-11 p-3 rounded-xl text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-600 focus-visible:ring-offset-2 ${data.superpower === power.id
+                                ? 'bg-lime-100 border-2 border-lime-600'
+                                : 'bg-stone-50 border-2 border-stone-300 hover:border-stone-500'
                                 }`}
                         >
                             <div className="flex items-center gap-3">
@@ -121,7 +130,7 @@ export function MotivationQuestions({ data, onChange, onNext, onBack, merchantNa
                                     <p className={`font-medium text-sm ${data.superpower === power.id ? 'text-lime-800' : 'text-stone-700'}`}>
                                         {power.label}
                                     </p>
-                                    <p className={`text-xs ${data.superpower === power.id ? 'text-lime-600' : 'text-stone-400'}`}>
+                                    <p className={`text-xs ${data.superpower === power.id ? 'text-lime-800' : 'text-stone-600'}`}>
                                         {power.desc}
                                     </p>
                                 </div>
@@ -129,43 +138,48 @@ export function MotivationQuestions({ data, onChange, onNext, onBack, merchantNa
                         </button>
                     ))}
                 </div>
-            </div>
+            </fieldset>
 
             {/* Above and beyond story — role-specific (optional) */}
             <div>
-                <h3 className="text-base font-semibold text-stone-800 mb-2">
+                <label htmlFor="motivation-secondary" className="block text-base font-semibold text-stone-800 mb-2">
                     {secondaryMotivation?.question || 'Share a time you went above and beyond'}
                     <Badge className="ml-2 bg-stone-100 text-stone-500 font-normal">Optional</Badge>
-                </h3>
-                <p className="text-xs text-stone-400 mb-3">
+                </label>
+                <p id="motivation-secondary-help" className="text-xs text-stone-500 mb-3">
                     A quick story that shows who you are
                 </p>
                 <textarea
+                    id="motivation-secondary"
+                    name="aboveAndBeyond"
+                    aria-describedby="motivation-secondary-help motivation-secondary-count"
                     value={data.aboveAndBeyond}
                     onChange={(e) => onChange({ ...data, aboveAndBeyond: e.target.value })}
                     placeholder="One time at my previous job..."
                     rows={3}
                     maxLength={secondaryMotivation?.maxChars || 400}
-                    className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3 text-stone-700 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-lime-500/50 focus:border-lime-500 resize-none"
+                    className="w-full bg-stone-50 border border-stone-300 rounded-xl px-4 py-3 text-stone-800 placeholder:text-stone-500 focus:outline-none focus:ring-2 focus:ring-lime-600 focus:border-lime-600 resize-none"
                 />
                 <div className="text-right mt-1">
-                    <span className="text-xs text-stone-400">{data.aboveAndBeyond.length}/{secondaryMotivation?.maxChars || 400}</span>
+                    <span id="motivation-secondary-count" className="text-xs text-stone-500">{data.aboveAndBeyond.length}/{secondaryMotivation?.maxChars || 400}</span>
                 </div>
             </div>
 
             {/* Navigation */}
-            <div className="flex gap-3 pt-4">
+            <div className="flex flex-wrap gap-3 pt-4">
                 <Button
+                    type="button"
                     variant="outline"
                     onClick={onBack}
-                    className="border-stone-200 text-stone-600 hover:bg-stone-50 rounded-xl"
+                    className="min-h-11 border-stone-300 text-stone-700 hover:bg-stone-50 rounded-xl"
                 >
                     ← Back
                 </Button>
                 <Button
+                    type="button"
                     onClick={onNext}
                     disabled={!isValid}
-                    className="flex-1 bg-lime-500 hover:bg-lime-600 text-white rounded-xl font-medium disabled:opacity-50"
+                    className="min-h-11 min-w-36 flex-1 bg-lime-600 hover:bg-lime-700 text-white rounded-xl font-medium disabled:opacity-50"
                 >
                     Almost Done! →
                 </Button>

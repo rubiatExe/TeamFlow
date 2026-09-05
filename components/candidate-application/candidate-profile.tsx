@@ -2,7 +2,6 @@
 
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 
 interface ProfileData {
     preferredShifts: string[];
@@ -42,140 +41,134 @@ const CONTACT_PREFS = [
     { id: 'email', label: '📧 Email' },
 ];
 
+const choiceClass = (selected: boolean) => `min-h-11 p-3 rounded-xl text-left text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-600 focus-visible:ring-offset-2 ${selected
+    ? 'bg-lime-100 text-lime-900 border-2 border-lime-600'
+    : 'bg-stone-50 text-stone-700 border-2 border-stone-300 hover:border-stone-500'
+    }`;
+
 export function CandidateProfile({ data, onChange, onNext, onBack }: CandidateProfileProps) {
-    const toggleShift = (shiftId: string) => {
-        const newShifts = data.preferredShifts.includes(shiftId)
-            ? data.preferredShifts.filter(s => s !== shiftId)
-            : [...data.preferredShifts, shiftId];
-        onChange({ ...data, preferredShifts: newShifts });
+    const toggleArrayValue = (field: 'preferredShifts' | 'daysAvailable', value: string) => {
+        const current = data[field];
+        onChange({
+            ...data,
+            [field]: current.includes(value)
+                ? current.filter(item => item !== value)
+                : [...current, value],
+        });
     };
 
-    const toggleDay = (day: string) => {
-        const newDays = data.daysAvailable.includes(day)
-            ? data.daysAvailable.filter(d => d !== day)
-            : [...data.daysAvailable, day];
-        onChange({ ...data, daysAvailable: newDays });
-    };
-
-    const isValid = data.preferredShifts.length > 0 &&
-        data.daysAvailable.length > 0 &&
-        data.transportation &&
-        data.contactPreference;
+    const isValid = data.preferredShifts.length > 0
+        && data.daysAvailable.length > 0
+        && data.transportation
+        && data.contactPreference;
 
     return (
         <div className="py-4 space-y-6">
-            {/* Preferred Shifts */}
-            <div>
-                <h3 className="text-base font-semibold text-stone-800 mb-3">
-                    What shifts work best for you? <span className="text-stone-400 font-normal">(select all that apply)</span>
-                </h3>
-                <div className="grid grid-cols-2 gap-2">
-                    {SHIFTS.map(shift => (
-                        <button
-                            key={shift.id}
-                            onClick={() => toggleShift(shift.id)}
-                            className={`p-3 rounded-xl text-left text-sm font-medium transition-all ${data.preferredShifts.includes(shift.id)
-                                    ? 'bg-lime-100 text-lime-800 border-2 border-lime-500'
-                                    : 'bg-stone-50 text-stone-600 border-2 border-stone-200 hover:border-stone-300'
-                                }`}
-                        >
-                            {shift.label}
-                        </button>
-                    ))}
+            <fieldset>
+                <legend className="mb-3 text-base font-semibold text-stone-800">
+                    What shifts work best for you? <span className="text-stone-500 font-normal">(select all that apply)</span>
+                </legend>
+                <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-2">
+                    {SHIFTS.map(shift => {
+                        const selected = data.preferredShifts.includes(shift.id);
+                        return (
+                            <button
+                                key={shift.id}
+                                type="button"
+                                aria-pressed={selected}
+                                onClick={() => toggleArrayValue('preferredShifts', shift.id)}
+                                className={choiceClass(selected)}
+                            >
+                                {shift.label}
+                            </button>
+                        );
+                    })}
                 </div>
-            </div>
+            </fieldset>
 
-            {/* Days Available */}
-            <div>
-                <h3 className="text-base font-semibold text-stone-800 mb-3">
-                    Which days are you available?
-                </h3>
+            <fieldset>
+                <legend className="mb-3 text-base font-semibold text-stone-800">Which days are you available?</legend>
                 <div className="flex flex-wrap gap-2">
-                    {DAYS.map(day => (
-                        <Badge
-                            key={day}
-                            onClick={() => toggleDay(day)}
-                            className={`cursor-pointer px-3 py-2 text-sm font-medium transition-all ${data.daysAvailable.includes(day)
-                                    ? 'bg-lime-500 text-white hover:bg-lime-600'
-                                    : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-                                }`}
-                        >
-                            {day.slice(0, 3)}
-                        </Badge>
-                    ))}
+                    {DAYS.map(day => {
+                        const selected = data.daysAvailable.includes(day);
+                        return (
+                            <button
+                                key={day}
+                                type="button"
+                                aria-pressed={selected}
+                                onClick={() => toggleArrayValue('daysAvailable', day)}
+                                className={`min-h-11 min-w-11 rounded-lg px-3 py-2 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-600 focus-visible:ring-offset-2 ${selected
+                                    ? 'bg-lime-600 text-white hover:bg-lime-700'
+                                    : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                                    }`}
+                            >
+                                <span className="min-[390px]:hidden">{day.slice(0, 3)}</span>
+                                <span className="hidden min-[390px]:inline">{day}</span>
+                            </button>
+                        );
+                    })}
                 </div>
-            </div>
+            </fieldset>
 
-            {/* Start Date */}
             <div>
-                <h3 className="text-base font-semibold text-stone-800 mb-3">
-                    When can you start?
-                </h3>
+                <label htmlFor="candidate-start-date" className="mb-3 block text-base font-semibold text-stone-800">
+                    When can you start? <span className="text-stone-500 font-normal">(optional)</span>
+                </label>
                 <input
+                    id="candidate-start-date"
+                    name="startDate"
                     type="date"
                     value={data.startDate}
-                    onChange={(e) => onChange({ ...data, startDate: e.target.value })}
-                    min={new Date().toISOString().split('T')[0]}
-                    className="w-full bg-stone-50 border border-stone-200 rounded-xl px-4 py-3 text-stone-700 focus:outline-none focus:ring-2 focus:ring-lime-500/50 focus:border-lime-500"
+                    onChange={(event) => onChange({ ...data, startDate: event.target.value })}
+                    className="w-full min-w-0 bg-stone-50 border border-stone-300 rounded-xl px-4 py-3 text-stone-800 focus:outline-none focus:ring-2 focus:ring-lime-600 focus:border-lime-600"
                 />
             </div>
 
-            {/* Transportation */}
-            <div>
-                <h3 className="text-base font-semibold text-stone-800 mb-3">
-                    How will you get to work?
-                </h3>
-                <div className="grid grid-cols-2 gap-2">
-                    {TRANSPORT.map(t => (
-                        <button
-                            key={t.id}
-                            onClick={() => onChange({ ...data, transportation: t.id })}
-                            className={`p-3 rounded-xl text-left text-sm font-medium transition-all ${data.transportation === t.id
-                                    ? 'bg-lime-100 text-lime-800 border-2 border-lime-500'
-                                    : 'bg-stone-50 text-stone-600 border-2 border-stone-200 hover:border-stone-300'
-                                }`}
-                        >
-                            {t.label}
-                        </button>
-                    ))}
+            <fieldset>
+                <legend className="mb-3 text-base font-semibold text-stone-800">How will you get to work?</legend>
+                <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-2">
+                    {TRANSPORT.map(option => {
+                        const selected = data.transportation === option.id;
+                        return (
+                            <button
+                                key={option.id}
+                                type="button"
+                                aria-pressed={selected}
+                                onClick={() => onChange({ ...data, transportation: option.id })}
+                                className={choiceClass(selected)}
+                            >
+                                {option.label}
+                            </button>
+                        );
+                    })}
                 </div>
-            </div>
+            </fieldset>
 
-            {/* Contact Preference */}
-            <div>
-                <h3 className="text-base font-semibold text-stone-800 mb-3">
-                    Best way to reach you?
-                </h3>
-                <div className="flex gap-2">
-                    {CONTACT_PREFS.map(pref => (
-                        <button
-                            key={pref.id}
-                            onClick={() => onChange({ ...data, contactPreference: pref.id })}
-                            className={`flex-1 p-3 rounded-xl text-center text-sm font-medium transition-all ${data.contactPreference === pref.id
-                                    ? 'bg-lime-100 text-lime-800 border-2 border-lime-500'
-                                    : 'bg-stone-50 text-stone-600 border-2 border-stone-200 hover:border-stone-300'
-                                }`}
-                        >
-                            {pref.label}
-                        </button>
-                    ))}
+            <fieldset>
+                <legend className="mb-3 text-base font-semibold text-stone-800">Best way to reach you?</legend>
+                <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-3">
+                    {CONTACT_PREFS.map(preference => {
+                        const selected = data.contactPreference === preference.id;
+                        return (
+                            <button
+                                key={preference.id}
+                                type="button"
+                                aria-pressed={selected}
+                                onClick={() => onChange({ ...data, contactPreference: preference.id })}
+                                className={`${choiceClass(selected)} text-center`}
+                            >
+                                {preference.label}
+                            </button>
+                        );
+                    })}
                 </div>
-            </div>
+            </fieldset>
 
-            {/* Navigation */}
-            <div className="flex gap-3 pt-4">
-                <Button
-                    variant="outline"
-                    onClick={onBack}
-                    className="border-stone-200 text-stone-600 hover:bg-stone-50 rounded-xl"
-                >
+            <div className="flex flex-wrap gap-3 pt-4">
+                <Button type="button" variant="outline" onClick={onBack} className="min-h-11 border-stone-300 text-stone-700 hover:bg-stone-50 rounded-xl">
                     ← Back
                 </Button>
-                <Button
-                    onClick={onNext}
-                    disabled={!isValid}
-                    className="flex-1 bg-lime-500 hover:bg-lime-600 text-white rounded-xl font-medium disabled:opacity-50"
-                >
+                <Button type="button" onClick={onNext} disabled={!isValid} className="min-h-11 min-w-36 flex-1 bg-lime-600 hover:bg-lime-700 text-white rounded-xl font-medium disabled:opacity-50">
                     Continue →
                 </Button>
             </div>

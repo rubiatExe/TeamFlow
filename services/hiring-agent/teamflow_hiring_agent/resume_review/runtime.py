@@ -128,11 +128,17 @@ class LangGraphResumeReviewWorkflow:
             "safety_settings": _SAFETY_SETTINGS,
         }
         primary = model_factory(model=settings.model, **model_options)
+        # The pinned LangChain adapter defaults ``n`` to one and translates it to
+        # Gemini's unsupported candidate_count field. Clear it before creating the
+        # structured runnables so Gemini 3.x requests omit that legacy control.
+        primary.n = None
         fallback = (
             model_factory(model=settings.fallback_model, **model_options)
             if settings.fallback_model and settings.fallback_model != settings.model
             else None
         )
+        if fallback is not None:
+            fallback.n = None
         self._agent1_model = FailoverRunnable(
             primary.with_structured_output(
                 schema=Agent1ModelOutput,

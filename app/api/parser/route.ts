@@ -2,125 +2,169 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ParserInputSchema, ParserOutputSchema } from '@/lib/contracts/parser';
 import { getRoleOrDefault } from '@/lib/domain/roles';
 import { saveCandidateToSupabase, DEMO_MERCHANT_ID } from '@/lib/db/supabase';
-import { createOcrFetchOptions } from '@/lib/observability/ocr-fetch';
+import {
+  linkResumeDocumentToCandidate,
+  saveResumeDocumentExtraction,
+} from '@/lib/db/resume-review';
+import {
+  readBoundedJson,
+  RequestBodyTooLargeError,
+} from '@/lib/http/bounded-json';
+import {
+  DocumentProcessorError,
+  requestDocumentExtraction,
+} from '@/lib/ai/document-processor-client';
 import {
   getActiveTraceFields,
   withTraceSpan,
 } from '@/lib/observability/tracing';
+import { guardLegacyDemoRoute } from '@/lib/http/legacy-demo-route';
 
 // Enable long-running API routes (Vercel serverless functions time out by default at 10-15s)
 export const maxDuration = 60;
 
 /**
- * TeamFlow — Agent 2: Semantic Evaluation Engine
+ * TeamFlow — Deterministic Resume Processing Pipeline
  * ------------------------------------------------
- * This route is the SECOND stage of the Sequential Multi-Agent Pipeline:
+ * This route orchestrates two bounded pipeline stages:
  *
- *   [Agent 1: OCR Extractor]  →  document processor /extract  →  raw markdown text
- *   [Agent 2: Scorer — THIS]  →  Gemini Models            →  ParserOutput (score, skills, flags)
+ *   [Document processor]  →  /extract       →  raw markdown text + embedding
+ *   [Structured scorer]   →  Gemini Models  →  ParserOutput (score, skills, flags)
  *
- * Agent 2 receives clean text from Agent 1, evaluating candidates against role criteria.
+ * The separate LangGraph hiring workflow lives behind /api/parser/agent and is not part
+ * of this reliability-sensitive upload path.
  */
 
 const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:8000';
 const hasGeminiApiKey = Boolean(process.env.GOOGLE_API_KEY);
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' } as const;
+// 10 MiB decoded input expands to at most ~13.99 MiB of Base64 plus bounded JSON fields.
+const MAX_PARSER_REQUEST_BYTES = 14_100_000;
 
-type OcrAgentResult = {
-  markdown: string;
-  embedding: number[] | null;
-};
+function jsonNoStore(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: NO_STORE_HEADERS,
+  });
+}
 
 import { callScorerAgent, extractAndScoreCandidate } from '@/lib/ai/scorer';
 
 // ── Pipeline Entry Point ──────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  const blocked = guardLegacyDemoRoute();
+  if (blocked) return blocked;
+
   const pipelineStart = Date.now();
   const requestId = crypto.randomUUID();
 
+  const contentLengthHeader = req.headers.get('content-length');
+  if (contentLengthHeader !== null) {
+    const contentLength = Number(contentLengthHeader);
+    if (
+      !Number.isSafeInteger(contentLength) || contentLength < 0 ||
+      contentLength > MAX_PARSER_REQUEST_BYTES
+    ) {
+      return jsonNoStore({ error: 'Request body is too large' }, 413);
+    }
+  }
+  let body: unknown;
   try {
-    const body = await req.json();
+    body = await readBoundedJson(req, MAX_PARSER_REQUEST_BYTES);
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      return jsonNoStore({ error: 'Request body is too large' }, 413);
+    }
+    return jsonNoStore({ error: 'Invalid JSON request' }, 400);
+  }
 
+  try {
     // 1. Validate Input
     const validation = ParserInputSchema.safeParse(body);
     if (!validation.success) {
-      return NextResponse.json({ error: validation.error.flatten() }, { status: 400 });
+      return jsonNoStore({ error: validation.error.flatten() }, 400);
     }
 
-    const { fileUrl, fileData, mimeType: inputMimeType, fileName, roleId } = validation.data;
+    const { fileData, mimeType, fileName, roleId } = validation.data;
     const role = getRoleOrDefault(roleId);
 
     console.log('[Pipeline] started', {
       requestId,
       roleId: role.id,
-      inputType: fileData ? 'inline' : 'url',
+      inputType: 'inline',
       ...getActiveTraceFields(),
     });
 
-    // ── Resolve file data ────────────────────────────────────────────────────
-    let base64Data: string;
-    let mimeType: string;
-
-    if (fileData) {
-      base64Data = fileData;
-      mimeType = inputMimeType || 'application/pdf';
-    } else if (fileUrl) {
-      const fileRes = await fetch(fileUrl);
-      if (!fileRes.ok) throw new Error(`Failed to fetch file: ${fileRes.statusText}`);
-      const arrayBuffer = await fileRes.arrayBuffer();
-      base64Data = Buffer.from(arrayBuffer).toString('base64');
-      const contentType = fileRes.headers.get('content-type') || 'application/pdf';
-      mimeType = contentType.includes('image') ? contentType : 'application/pdf';
-    } else {
-      return NextResponse.json({ error: 'No file data provided' }, { status: 400 });
-    }
+    const documentBytes = Buffer.from(fileData, 'base64');
 
     // ═════════════════════════════════════════════════════════════════════════
     // SEQUENTIAL MULTI-AGENT PIPELINE
-    // Step 1 → Agent 1 (OCR)     — document processor /extract → markdown text
-    // Step 2 → Agent 2 (Scorer)  — Gemini Pro text scoring → ParserOutput
+    // Step 1 → Document processing — /extract → markdown text + embedding
+    // Step 2 → Structured scoring  — Gemini → validated ParserOutput
     // ═════════════════════════════════════════════════════════════════════════
 
-    // ── Step 1: OCR Extraction (Agent 1) ─────────────────────────────────────
-    const ocrResult = await callOcrAgent(base64Data, mimeType, fileName || 'resume.pdf');
+    // ── Step 1: Document processing ──────────────────────────────────────────
+    const ocrResult = await requestDocumentExtraction({
+      bytes: documentBytes,
+      mimeType,
+      fileName,
+      serviceUrl: OCR_SERVICE_URL,
+      token: process.env.OCR_SERVICE_TOKEN || '',
+    });
     const resumeMarkdown = ocrResult.markdown;
 
+    // Persist the validated, tenant-scoped source snapshot for the separate Phase 4
+    // document-ID-only review endpoint. Raw bytes and embeddings are not copied here.
+    let reviewReady = false;
+    if (process.env.RESUME_REVIEW_STORE_DOCUMENTS === 'true') {
+      try {
+        reviewReady = await saveResumeDocumentExtraction(DEMO_MERCHANT_ID, ocrResult);
+      } catch (snapshotError) {
+        console.warn('[Pipeline] Resume-review snapshot was not persisted', {
+          requestId,
+          errorType: snapshotError instanceof Error
+            ? snapshotError.name
+            : 'UnknownError',
+        });
+      }
+    }
+
     if (ocrResult.embedding) {
-      console.log(`[Pipeline] Agent 1 embedding ready: ${ocrResult.embedding.length}-dim`);
+      console.log(`[Pipeline] Document embedding ready: ${ocrResult.embedding.length}-dim`);
     }
 
-    // ── Step 2: Semantic Scoring (Agent 2) ───────────────────────────────────
-    if (!resumeMarkdown.trim()) {
-      console.log('[Pipeline] OCR unavailable — performing dynamic role-based evaluation');
-      const dynamicResult = ParserOutputSchema.parse(
-        extractAndScoreCandidate('', fileName || 'Resume.pdf', role),
-      );
-      return NextResponse.json({ ...dynamicResult, requestId });
-    }
-
+    // ── Step 2: Structured semantic scoring ──────────────────────────────────
     if (!hasGeminiApiKey) {
       console.log('[Pipeline] No Gemini API key — performing dynamic role-based candidate evaluation from OCR text');
       const dynamicResult = ParserOutputSchema.parse(
         extractAndScoreCandidate(
           resumeMarkdown,
-          fileName || 'Resume.pdf',
+          fileName,
           role,
         ),
       );
-      return NextResponse.json({ ...dynamicResult, requestId });
+      return jsonNoStore({
+        ...dynamicResult,
+        requestId,
+        documentId: ocrResult.document_id,
+        extractionStatus: ocrResult.status,
+        extractionWarnings: ocrResult.warnings,
+        reviewReady,
+      });
     }
 
     const parsedData = ParserOutputSchema.parse(
       await callScorerAgent(
         resumeMarkdown,
         role,
-        fileName || 'Resume.pdf',
+        fileName,
         false,
         requestId,
       ),
     );
 
-    // ── Persist candidate to Supabase (with embedding from Agent 1) ───────────
+    // ── Persist candidate to Supabase (with document embedding) ───────────────
     let candidateId: string | null = null;
     try {
       candidateId = await withTraceSpan(
@@ -139,23 +183,23 @@ export async function POST(req: NextRequest) {
             status: 'new',
             resume_url: 'uploaded',          // placeholder — real Storage upload would provide this
             resume_text: resumeMarkdown.slice(0, 50_000),
-            fit_score: parsedData.score?.total,
-            analysis: {
-              breakdown: parsedData.score?.breakdown,
-              explanation: parsedData.score?.explanation,
-              skills: parsedData.candidate?.skills,
-              experience_years: parsedData.candidate?.experience_years,
-              applied_role: parsedData.candidate?.applied_role,
-            },
-            red_flags: parsedData.red_flags || [],
-            summary: parsedData.score?.explanation?.slice(0, 200) || '',
+            // The legacy scorer remains a non-authoritative preview. Durable candidate
+            // scores and analyses are written only by an approved Phase 6 decision.
+            summary: 'Awaiting authorized human review',
             source: 'upload',
-            // Embedding from Agent 1 — stored in pgvector vector(768) column
+            // Document embedding — stored in pgvector vector(768) column
             embedding: ocrResult.embedding ?? undefined,
           }),
       );
 
       if (candidateId) {
+        if (reviewReady) {
+          reviewReady = await linkResumeDocumentToCandidate(
+            DEMO_MERCHANT_ID,
+            candidateId,
+            ocrResult.document_id,
+          );
+        }
         console.log('[Pipeline] Candidate saved to Supabase', {
           requestId,
           candidateId,
@@ -178,52 +222,46 @@ export async function POST(req: NextRequest) {
     console.log('[Pipeline] completed', {
       requestId,
       elapsedMs: elapsed,
-      score: parsedData.score.total,
+          previewScore: parsedData.score.total,
       ...getActiveTraceFields(),
     });
 
-    return NextResponse.json({ ...parsedData, candidateId, requestId });
+    return jsonNoStore({
+      ...parsedData,
+      candidateId,
+      requestId,
+      documentId: ocrResult.document_id,
+      extractionStatus: ocrResult.status,
+      extractionWarnings: ocrResult.warnings,
+      reviewReady,
+    });
 
   } catch (error) {
+    if (error instanceof DocumentProcessorError) {
+      const responseStatus = error.status === 401 ? 502 : error.status;
+      console.warn('[Pipeline] document extraction rejected', {
+        requestId,
+        code: error.code,
+        status: responseStatus,
+        ...getActiveTraceFields(),
+      });
+      return jsonNoStore(
+        {
+          error: 'Document extraction failed',
+          code: error.code,
+          requestId,
+        },
+        responseStatus,
+      );
+    }
     console.error('[Pipeline] failed', {
       requestId,
       errorType: error instanceof Error ? error.name : 'UnknownError',
       ...getActiveTraceFields(),
     });
-    return NextResponse.json(
+    return jsonNoStore(
       { error: 'Internal Server Error', requestId },
-      { status: 500 },
+      500,
     );
-  }
-}
-
-async function callOcrAgent(base64Data: string, mimeType: string, fileName: string): Promise<OcrAgentResult> {
-  const formData = new FormData();
-  const buffer = Buffer.from(base64Data, 'base64');
-  const blob = new Blob([buffer], { type: mimeType });
-  formData.append('file', blob, fileName);
-
-  try {
-    const response = await fetch(
-      `${OCR_SERVICE_URL}/extract`,
-      createOcrFetchOptions(
-        formData,
-        process.env.OCR_SERVICE_TOKEN || '',
-      ),
-    );
-    
-    if (!response.ok) {
-      console.warn(`[OCR] Service returned status: ${response.status}`);
-      return { markdown: '', embedding: null };
-    }
-    
-    const data = await response.json();
-    return {
-      markdown: data.markdown || '',
-      embedding: data.embedding || null,
-    };
-  } catch (error) {
-    console.error('[OCR] Failed to call OCR service:', error);
-    return { markdown: '', embedding: null };
   }
 }

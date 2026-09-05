@@ -61,10 +61,8 @@ export const CAFE_ROLES: CafeRole[] = [
         wageRange: { min: 15, max: 18 },
         dealbreakers: [
             'Weekend availability required',
-            'Must be 18+',
             'Valid work authorization',
             "Food Handler's Permit required",
-            'Reliable transportation',
         ],
         essentialSkills: [
             { id: 'espresso_machine', label: '☕ Espresso Machine' },
@@ -98,10 +96,8 @@ export const CAFE_ROLES: CafeRole[] = [
         ],
         questions: {
             knockout: [
-                { id: 'bk_age', question: 'Are you at least 18 years of age?', type: 'boolean', failValue: 'no' },
                 { id: 'bk_auth', question: 'Are you legally authorized to work in the US?', type: 'boolean', failValue: 'no' },
                 { id: 'bk_weekend', question: 'Can you work at least one weekend day (Saturday or Sunday) every week?', type: 'boolean', failValue: 'no' },
-                { id: 'bk_transport', question: 'Do you have reliable transportation to get to work on time?', type: 'boolean', failValue: 'no' },
             ],
             skills: [
                 {
@@ -177,7 +173,6 @@ export const CAFE_ROLES: CafeRole[] = [
         ],
         questions: {
             knockout: [
-                { id: 'sk_age', question: 'Are you at least 21 years of age?', type: 'boolean', failValue: 'no' },
                 { id: 'sk_auth', question: 'Are you legally authorized to work in the US?', type: 'boolean', failValue: 'no' },
                 { id: 'sk_hours', question: 'Can you commit to a minimum of 30 hours per week?', type: 'boolean', failValue: 'no' },
                 { id: 'sk_closing', question: 'Are you available for closing shifts (until 11 PM) at least 3 days per week?', type: 'boolean', failValue: 'no' },
@@ -219,11 +214,8 @@ export const CAFE_ROLES: CafeRole[] = [
         wageRange: { min: 16, max: 20 },
         dealbreakers: [
             'Weekend availability required',
-            'Must be 18+',
             'Valid work authorization',
             "Food Handler's Permit required",
-            'Able to lift 50 lbs repeatedly',
-            'Comfortable standing for 8+ hour shifts',
         ],
         essentialSkills: [
             { id: 'knife_skills', label: '🔪 Knife Skills' },
@@ -256,10 +248,7 @@ export const CAFE_ROLES: CafeRole[] = [
         ],
         questions: {
             knockout: [
-                { id: 'lk_age', question: 'Are you at least 18 years of age?', type: 'boolean', failValue: 'no' },
                 { id: 'lk_auth', question: 'Are you legally authorized to work in the US?', type: 'boolean', failValue: 'no' },
-                { id: 'lk_lift', question: 'Are you comfortable lifting up to 50 lbs repeatedly throughout a shift?', type: 'boolean', failValue: 'no' },
-                { id: 'lk_standing', question: 'Can you stand for 8+ hours during a shift?', type: 'boolean', failValue: 'no' },
                 { id: 'lk_weekend', question: 'Can you work at least one weekend day per week?', type: 'boolean', failValue: 'no' },
             ],
             skills: [
@@ -298,9 +287,7 @@ export const CAFE_ROLES: CafeRole[] = [
         wageRange: { min: 14, max: 16 },
         dealbreakers: [
             'Weekend availability required',
-            'Must be 18+',
             'Valid work authorization',
-            'Reliable transportation',
         ],
         essentialSkills: [
             { id: 'pos_register', label: '💳 POS/Register Systems' },
@@ -332,10 +319,8 @@ export const CAFE_ROLES: CafeRole[] = [
         ],
         questions: {
             knockout: [
-                { id: 'ck_age', question: 'Are you at least 18 years of age?', type: 'boolean', failValue: 'no' },
                 { id: 'ck_auth', question: 'Are you legally authorized to work in the US?', type: 'boolean', failValue: 'no' },
                 { id: 'ck_weekend', question: 'Can you work at least one weekend day per week?', type: 'boolean', failValue: 'no' },
-                { id: 'ck_transport', question: 'Do you have reliable transportation to get to work on time?', type: 'boolean', failValue: 'no' },
             ],
             skills: [
                 {
@@ -373,10 +358,8 @@ export const CAFE_ROLES: CafeRole[] = [
         wageRange: { min: 16, max: 20 },
         dealbreakers: [
             'Early morning availability (4-5 AM start)',
-            'Must be 18+',
             'Valid work authorization',
             "Food Handler's Permit required",
-            'Able to lift 50 lbs (flour bags, sheet trays)',
         ],
         essentialSkills: [
             { id: 'baking_scratch', label: '🍞 Baking from Scratch' },
@@ -410,10 +393,8 @@ export const CAFE_ROLES: CafeRole[] = [
         ],
         questions: {
             knockout: [
-                { id: 'pk_age', question: 'Are you at least 18 years of age?', type: 'boolean', failValue: 'no' },
                 { id: 'pk_auth', question: 'Are you legally authorized to work in the US?', type: 'boolean', failValue: 'no' },
                 { id: 'pk_early', question: 'Can you consistently start shifts at 4-5 AM?', type: 'boolean', failValue: 'no' },
-                { id: 'pk_lift', question: 'Are you comfortable lifting up to 50 lbs (flour bags, sheet trays)?', type: 'boolean', failValue: 'no' },
             ],
             skills: [
                 {
@@ -459,4 +440,24 @@ export function getAllRoleIds(): string[] {
 
 export function getRoleTitles(): { id: string; title: string; emoji: string }[] {
     return CAFE_ROLES.map(r => ({ id: r.id, title: r.title, emoji: r.emoji }));
+}
+
+export function normalizeRoleQuestionAnswer(answer: string | boolean): string {
+    if (typeof answer === 'boolean') return answer ? 'yes' : 'no';
+    return answer.normalize('NFKC').trim().toLocaleLowerCase('en-US');
+}
+
+export function isRoleQuestionAnswerTypeValid(
+    question: RoleQuestion,
+    answer: string | boolean,
+): boolean {
+    return question.type === 'boolean' ? typeof answer === 'boolean' : typeof answer === 'string';
+}
+
+export function isRoleQuestionFailure(
+    question: RoleQuestion,
+    answer: string | boolean,
+): boolean {
+    return question.failValue !== undefined
+        && normalizeRoleQuestionAnswer(answer) === normalizeRoleQuestionAnswer(question.failValue);
 }

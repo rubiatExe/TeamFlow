@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { CAFE_ROLES } from '@/lib/domain/roles';
+import { guardLegacyDemoRoute } from '@/lib/http/legacy-demo-route';
 
 // Square Labor API simulation — now sourced from centralized role config
 // In production, this would call Square's Team & Labor APIs
@@ -18,6 +19,9 @@ const DEMO_STORE = {
 };
 
 export async function GET() {
+    const blocked = guardLegacyDemoRoute();
+    if (blocked) return blocked;
+
     // Simulate API latency
     await new Promise(resolve => setTimeout(resolve, 200));
 

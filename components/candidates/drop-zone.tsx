@@ -1,19 +1,16 @@
 "use client";
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useId, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { getRoleById } from '@/lib/domain/roles';
 import { useToast } from '@/components/ui/toast';
-import { ParserOutput } from '@/lib/contracts/parser';
+import { ParserOutputSchema, type ParserOutput } from '@/lib/contracts/parser';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ACCEPTED_TYPES = [
     'application/pdf',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'image/jpeg',
     'image/png',
-    'image/heic',
 ];
 
 interface DropZoneProps {
@@ -31,6 +28,8 @@ export function DropZone({ onFileProcessed, roleId }: DropZoneProps) {
     const [isDragging, setIsDragging] = useState(false);
     const [fileStatuses, setFileStatuses] = useState<FileStatus[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const fileInputId = useId();
+    const helpId = useId();
     const { addToast } = useToast();
 
     const role = roleId ? getRoleById(roleId) : undefined;
@@ -39,9 +38,7 @@ export function DropZone({ onFileProcessed, roleId }: DropZoneProps) {
         if (file.size > MAX_FILE_SIZE) {
             return `File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max 10MB.`;
         }
-        const isAccepted = ACCEPTED_TYPES.includes(file.type) ||
-            file.name.endsWith('.pdf') || file.name.endsWith('.docx') ||
-            file.name.endsWith('.doc') || file.name.endsWith('.heic');
+        const isAccepted = ACCEPTED_TYPES.includes(file.type);
         if (!isAccepted) {
             return `Unsupported file type: ${file.type || 'unknown'}`;
         }
@@ -107,15 +104,15 @@ export function DropZone({ onFileProcessed, roleId }: DropZoneProps) {
                 }
 
                 const result = await response.json();
+                const parsedResult = ParserOutputSchema.safeParse(result);
 
-                // Check if result has the expected structure
-                if (result.candidate && result.score) {
-                    onFileProcessed(result);
+                if (parsedResult.success) {
+                    onFileProcessed(parsedResult.data);
                     setFileStatuses(prev => prev.map(f =>
                         f.name === fileName ? { ...f, status: 'success' } : f
                     ));
                     successCount++;
-                    addToast(`✓ ${result.candidate.name || fileName} parsed successfully (Score: ${result.score.total})`, 'success');
+                    addToast(`${parsedResult.data.candidate.name || fileName} processed for local demo review`, 'success');
                 } else {
                     addToast(`Unexpected response format for ${fileName}`, 'error');
                     setFileStatuses(prev => prev.map(f =>
@@ -180,22 +177,25 @@ export function DropZone({ onFileProcessed, roleId }: DropZoneProps) {
 
     return (
         <Card
-            className={`border-2 border-dashed transition-all duration-200 cursor-pointer rounded-2xl bg-white ${isDragging
+            aria-busy={uploadingCount > 0}
+            className={`border-2 border-dashed transition-all duration-200 rounded-2xl bg-white ${isDragging
                 ? 'border-lime-500 bg-lime-50'
                 : 'border-stone-300 hover:border-stone-400 hover:bg-stone-50'
                 }`}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
-            onClick={handleClick}
         >
             <input
+                id={fileInputId}
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.heic"
+                accept=".pdf,.jpg,.jpeg,.png"
+                aria-label="Choose resume files"
                 onChange={handleFileInput}
-                className="hidden"
+                aria-describedby={helpId}
+                className="sr-only"
             />
             <CardContent className="flex flex-col items-center justify-center py-16 text-center">
                 <div className="text-5xl mb-4">📄</div>
@@ -204,26 +204,43 @@ export function DropZone({ onFileProcessed, roleId }: DropZoneProps) {
                 {role && (
                     <div className="mb-2 px-3 py-1 bg-lime-100 text-lime-700 rounded-lg text-sm font-medium inline-flex items-center gap-1.5">
                         <span>{role.emoji}</span>
-                        <span>Scoring for: {role.title}</span>
+                        <span>Local demo analysis role: {role.title}</span>
                     </div>
                 )}
 
-                <p className="text-stone-400 text-sm">
-                    or <span className="text-lime-600 font-medium hover:underline">click to browse</span>
-                </p>
-                <p className="text-stone-300 text-xs mt-1">
-                    PDF, DOCX, JPG, PNG, HEIC • Max 10MB
+                <p className="text-stone-600 text-sm">Drop files here or</p>
+                <button
+                    type="button"
+                    onClick={handleClick}
+                    className="mt-2 min-h-11 rounded-lg border border-lime-700 px-4 py-2 text-sm font-medium text-lime-800 hover:bg-lime-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-600 focus-visible:ring-offset-2"
+                >
+                    Browse files
+                </button>
+                <p id={helpId} className="text-stone-500 text-xs mt-1">
+                    PDF, JPG, PNG • Max 10MB
                 </p>
 
                 {fileStatuses.length > 0 && (
-                    <div className="mt-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                    <div
+                        className="mt-6 w-full max-w-sm"
+                        role="status"
+                        aria-live="polite"
+                        aria-atomic="true"
+                    >
                         {/* Batch progress header */}
                         {totalCount > 1 && (
                             <div className="mb-3 flex items-center justify-between text-sm">
                                 <span className="text-stone-600 font-medium">
                                     Processing {totalCount - uploadingCount} / {totalCount}
                                 </span>
-                                <div className="w-24 h-1.5 bg-stone-200 rounded-full overflow-hidden">
+                                <div
+                                    className="w-24 h-1.5 bg-stone-200 rounded-full overflow-hidden"
+                                    role="progressbar"
+                                    aria-label="File processing progress"
+                                    aria-valuemin={0}
+                                    aria-valuemax={totalCount}
+                                    aria-valuenow={totalCount - uploadingCount}
+                                >
                                     <div
                                         className="h-full bg-lime-500 rounded-full transition-all duration-500"
                                         style={{ width: `${((totalCount - uploadingCount) / totalCount) * 100}%` }}
@@ -240,14 +257,14 @@ export function DropZone({ onFileProcessed, roleId }: DropZoneProps) {
                                 {file.status === 'uploading' && (
                                     <div className="animate-spin h-4 w-4 border-2 border-lime-500 border-t-transparent rounded-full flex-shrink-0"></div>
                                 )}
-                                {file.status === 'success' && <span className="text-lime-600 flex-shrink-0">✓</span>}
-                                {file.status === 'error' && <span className="text-red-500 flex-shrink-0">✕</span>}
+                                {file.status === 'success' && <span className="text-lime-700 flex-shrink-0">✓</span>}
+                                {file.status === 'error' && <span className="text-red-700 flex-shrink-0">✕</span>}
                                 <span className="text-sm truncate flex-1 text-stone-600">{file.name}</span>
-                                <span className={`text-xs font-medium ${file.status === 'uploading' ? 'text-lime-600' :
-                                        file.status === 'success' ? 'text-lime-600' :
-                                            'text-red-500'
+                                <span className={`text-xs font-medium ${file.status === 'uploading' ? 'text-lime-700' :
+                                        file.status === 'success' ? 'text-lime-700' :
+                                            'text-red-700'
                                     }`}>
-                                    {file.status === 'uploading' ? 'Scanning...' :
+                                    {file.status === 'uploading' ? 'Processing…' :
                                         file.status === 'success' ? 'Done' :
                                             'Failed'}
                                 </span>

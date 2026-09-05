@@ -14,8 +14,12 @@ import {
 } from '@/lib/contracts/resume-review-api';
 import { DEMO_MERCHANT_ID } from '@/lib/db/supabase';
 import {
+  InvalidRequestFramingError,
   readBoundedJson,
+  RequestBodyDeadlineError,
   RequestBodyTooLargeError,
+  UnsupportedJsonMediaTypeError,
+  validateBoundedJsonRequestHeaders,
 } from '@/lib/http/bounded-json';
 
 export const maxDuration = 60;
@@ -25,6 +29,7 @@ const RESPONSE_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
 } as const;
 const MAX_REVIEW_REQUEST_BYTES = 8_192;
+const MAX_BODY_READ_MILLISECONDS = 5_000;
 
 function json(body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: RESPONSE_HEADERS });
@@ -37,22 +42,27 @@ export async function POST(req: NextRequest) {
     return json({ error: accessFailure.error, requestId }, accessFailure.status);
   }
 
-  const contentLengthHeader = req.headers.get('content-length');
-  const contentLength = contentLengthHeader === null ? null : Number(contentLengthHeader);
-  if (
-    contentLength !== null &&
-    (!Number.isSafeInteger(contentLength) || contentLength < 0 ||
-      contentLength > MAX_REVIEW_REQUEST_BYTES)
-  ) {
-    return json({ error: 'Request body is too large', requestId }, 413);
-  }
-
   let body: unknown;
   try {
-    body = await readBoundedJson(req, MAX_REVIEW_REQUEST_BYTES);
+    validateBoundedJsonRequestHeaders(req, MAX_REVIEW_REQUEST_BYTES);
+    body = await readBoundedJson(req, MAX_REVIEW_REQUEST_BYTES, {
+      signal: AbortSignal.any([
+        req.signal,
+        AbortSignal.timeout(MAX_BODY_READ_MILLISECONDS),
+      ]),
+    });
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) {
       return json({ error: 'Request body is too large', requestId }, 413);
+    }
+    if (error instanceof RequestBodyDeadlineError) {
+      return json({ error: 'Request body deadline exceeded', requestId }, 408);
+    }
+    if (error instanceof UnsupportedJsonMediaTypeError) {
+      return json({ error: 'Content-Type must be application/json', requestId }, 415);
+    }
+    if (error instanceof InvalidRequestFramingError) {
+      return json({ error: 'Invalid request framing', requestId }, 400);
     }
     return json({ error: 'Invalid JSON request', requestId }, 400);
   }

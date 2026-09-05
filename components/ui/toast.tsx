@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
@@ -37,36 +37,57 @@ const TOAST_COLORS: Record<ToastType, string> = {
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
     const [toasts, setToasts] = useState<Toast[]>([]);
-
-    const addToast = useCallback((message: string, type: ToastType = 'info', duration: number = 4000) => {
-        const id = `toast_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-        setToasts(prev => [...prev, { id, message, type, duration }]);
-
-        setTimeout(() => {
-            setToasts(prev => prev.filter(t => t.id !== id));
-        }, duration);
-    }, []);
+    const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
     const dismissToast = useCallback((id: string) => {
-        setToasts(prev => prev.filter(t => t.id !== id));
+        const timer = timersRef.current.get(id);
+        if (timer) clearTimeout(timer);
+        timersRef.current.delete(id);
+        setToasts(prev => prev.filter(toast => toast.id !== id));
     }, []);
 
+    const addToast = useCallback((message: string, type: ToastType = 'info', duration?: number) => {
+        const visibleDuration = duration ?? (type === 'error' || type === 'warning' ? 8000 : 5000);
+        const id = `toast_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        setToasts(prev => [...prev, { id, message, type, duration: visibleDuration }]);
+
+        const timer = setTimeout(() => {
+            timersRef.current.delete(id);
+            setToasts(prev => prev.filter(toast => toast.id !== id));
+        }, visibleDuration);
+        timersRef.current.set(id, timer);
+    }, []);
+
+    useEffect(() => () => {
+        for (const timer of timersRef.current.values()) clearTimeout(timer);
+        timersRef.current.clear();
+    }, []);
+
+    const contextValue = useMemo(() => ({ addToast }), [addToast]);
+
     return (
-        <ToastContext.Provider value={{ addToast }}>
+        <ToastContext.Provider value={contextValue}>
             {children}
 
             {/* Toast Container */}
-            <div className="fixed bottom-20 right-6 z-[100] flex flex-col gap-2 max-w-sm">
+            <div
+                aria-label="Notifications"
+                className="pointer-events-none fixed inset-x-3 bottom-4 z-[100] flex flex-col gap-2 sm:inset-x-auto sm:bottom-20 sm:right-6 sm:w-full sm:max-w-sm"
+            >
                 {toasts.map(toast => (
                     <div
                         key={toast.id}
-                        className={`flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg animate-in slide-in-from-right-5 fade-in duration-300 ${TOAST_COLORS[toast.type]}`}
+                        role={toast.type === 'error' || toast.type === 'warning' ? 'alert' : 'status'}
+                        aria-atomic="true"
+                        className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg animate-in slide-in-from-right-5 fade-in duration-300 ${TOAST_COLORS[toast.type]}`}
                     >
-                        <span className="text-lg flex-shrink-0">{TOAST_ICONS[toast.type]}</span>
+                        <span aria-hidden="true" className="text-lg flex-shrink-0">{TOAST_ICONS[toast.type]}</span>
                         <p className="text-sm font-medium flex-1">{toast.message}</p>
                         <button
+                            type="button"
+                            aria-label="Dismiss notification"
                             onClick={() => dismissToast(toast.id)}
-                            className="text-current opacity-50 hover:opacity-100 transition-opacity flex-shrink-0"
+                            className="min-h-11 min-w-11 rounded-lg text-current opacity-70 hover:bg-black/5 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current transition-opacity flex-shrink-0"
                         >
                             ✕
                         </button>

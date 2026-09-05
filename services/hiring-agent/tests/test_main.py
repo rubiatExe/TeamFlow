@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -18,6 +21,13 @@ def test_build_app_uses_one_immutable_snapshot_in_fail_closed_order() -> None:
     events: list[str] = []
     received_environments: list[Mapping[str, str]] = []
     runtime = object()
+    review_workflow = object()
+    hitl_runtime = object()
+    components = service_main.HiringServiceComponents(
+        hiring_runtime=runtime,  # type: ignore[arg-type]
+        resume_review_workflow=review_workflow,
+        hitl_runtime=hitl_runtime,  # type: ignore[arg-type]
+    )
     settings = object()
     application = object()
 
@@ -30,25 +40,34 @@ def test_build_app_uses_one_immutable_snapshot_in_fail_closed_order() -> None:
         received_environments.append(environment)
         with pytest.raises(TypeError):
             environment["ENVIRONMENT"] = "production"  # type: ignore[index]
-        return runtime
+        return components
 
     def read_http_settings(environment: Mapping[str, str]) -> Any:
         events.append("http_settings")
         received_environments.append(environment)
         return settings
 
-    def create_application(composed_runtime: Any, *, settings: Any) -> Any:
+    def create_application(
+        composed_runtime: Any,
+        *,
+        settings: Any,
+        resume_review_workflow: Any,
+        hitl_runtime: Any,
+    ) -> Any:
         events.append("application")
         assert composed_runtime is runtime
         assert settings is globals_settings
+        assert resume_review_workflow is review_workflow
+        assert hitl_runtime is globals_hitl_runtime
         return application
 
     globals_settings = settings
+    globals_hitl_runtime = hitl_runtime
     source = {"ENVIRONMENT": "test", "HIRING_AGENT_TOKEN": "secret"}
     result = service_main.build_app(
         source,
         telemetry_initializer=initialize_telemetry,
-        runtime_factory=compose,
+        composition_factory=compose,
         http_settings_factory=read_http_settings,
         application_factory=create_application,
     )
@@ -119,6 +138,13 @@ def test_main_validates_port_before_initializing_dependencies() -> None:
 def test_main_runs_the_factory_result_on_the_validated_port() -> None:
     events: list[str] = []
     runtime = object()
+    review_workflow = object()
+    hitl_runtime = object()
+    components = service_main.HiringServiceComponents(
+        hiring_runtime=runtime,  # type: ignore[arg-type]
+        resume_review_workflow=review_workflow,
+        hitl_runtime=hitl_runtime,  # type: ignore[arg-type]
+    )
     settings = object()
     application = object()
 
@@ -128,16 +154,24 @@ def test_main_runs_the_factory_result_on_the_validated_port() -> None:
 
     def compose(_environment: Mapping[str, str]) -> Any:
         events.append("composition")
-        return runtime
+        return components
 
     def read_http_settings(_environment: Mapping[str, str]) -> Any:
         events.append("http_settings")
         return settings
 
-    def create_application(composed_runtime: Any, *, settings: Any) -> Any:
+    def create_application(
+        composed_runtime: Any,
+        *,
+        settings: Any,
+        resume_review_workflow: Any,
+        hitl_runtime: Any,
+    ) -> Any:
         events.append("application")
         assert composed_runtime is runtime
         assert settings is globals_settings
+        assert resume_review_workflow is review_workflow
+        assert hitl_runtime is globals_hitl_runtime
         return application
 
     def run_server(app: Any, *, host: str, port: int) -> None:
@@ -147,10 +181,11 @@ def test_main_runs_the_factory_result_on_the_validated_port() -> None:
         assert port == 9090
 
     globals_settings = settings
+    globals_hitl_runtime = hitl_runtime
     service_main.main(
         {"PORT": "9090", "ENVIRONMENT": "test"},
         telemetry_initializer=initialize_telemetry,
-        runtime_factory=compose,
+        composition_factory=compose,
         http_settings_factory=read_http_settings,
         application_factory=create_application,
         server_runner=run_server,
@@ -176,4 +211,88 @@ def test_container_uses_a_locked_non_root_exec_entrypoint() -> None:
     assert "uvicorn main:app" not in dockerfile
     assert dockerignore.startswith("# Send only the production hiring runtime")
     assert "!requirements.lock" in dockerignore
-    assert "teamflow_hiring_agent/resume_review/" in dockerignore
+    assert "teamflow_hiring_agent/resume_review/" not in dockerignore
+    for marker in (".env*", "gha-creds-*.json", "cloudbuild*.yaml"):
+        assert marker in dockerignore
+
+
+def test_minimal_container_source_imports_main_and_serves_health(tmp_path: Path) -> None:
+    service_root = Path(__file__).resolve().parents[1]
+    package_root = service_root / "teamflow_hiring_agent"
+
+    def container_exclusions(directory: str, names: list[str]) -> set[str]:
+        excluded = {
+            name for name in names if name == "__pycache__" or name.endswith((".pyc", ".pyo"))
+        }
+        if Path(directory) == package_root:
+            excluded.update({"api.py", "evaluation"})
+        return excluded
+
+    shutil.copy2(service_root / "main.py", tmp_path / "main.py")
+    shutil.copytree(
+        package_root,
+        tmp_path / "teamflow_hiring_agent",
+        ignore=container_exclusions,
+    )
+    exercise = """
+import asyncio
+import sys
+
+import httpx
+
+sys.path.insert(0, ".")
+import main
+from teamflow_hiring_agent.composition import TenantScopedHiringRuntime
+from teamflow_hiring_agent.config import HumanReviewRuntimeSettings
+from teamflow_hiring_agent.resume_review.hitl.runtime import HumanReviewRuntime
+from teamflow_hiring_agent.service_composition import HiringServiceComponents
+
+
+class InertWorkflow:
+    async def invoke(self, _request):
+        raise AssertionError("health must not invoke a workflow")
+
+
+review_workflow = InertWorkflow()
+components = HiringServiceComponents(
+    hiring_runtime=TenantScopedHiringRuntime(
+        merchant_id="00000000-0000-0000-0000-000000000001",
+        environment="test",
+        mock_tools=True,
+        workflow=InertWorkflow(),
+    ),
+    resume_review_workflow=review_workflow,
+    hitl_runtime=HumanReviewRuntime(
+        HumanReviewRuntimeSettings(),
+        analysis_runner=review_workflow,
+    ),
+)
+application = main.build_app(
+    {"ENVIRONMENT": "test", "HIRING_AGENT_TOKEN": "test-token"},
+    telemetry_initializer=lambda _snapshot: None,
+    composition_factory=lambda _snapshot: components,
+)
+assert "app" not in vars(main)
+
+
+async def check_health():
+    transport = httpx.ASGITransport(app=application)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+asyncio.run(check_health())
+"""
+
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", exercise],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr

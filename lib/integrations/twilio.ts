@@ -21,9 +21,8 @@ interface SMSResult {
  */
 export async function sendSMS({ to, message }: SendSMSParams): Promise<SMSResult> {
     if (MOCK_MODE) {
-        console.log('📱 [MOCK SMS]');
-        console.log(`   To: ${to}`);
-        console.log(`   Message: ${message}`);
+        // Phone numbers, message bodies, and bearer links must never enter logs.
+        console.log('[SMS] Mock delivery simulated');
         return { success: true, messageId: `mock_${Date.now()}`, mock: true };
     }
 
@@ -47,16 +46,19 @@ export async function sendSMS({ to, message }: SendSMSParams): Promise<SMSResult
         );
 
         if (!response.ok) {
-            const error = await response.text();
-            console.error('Twilio error:', error);
-            return { success: false, error };
+            // Drain the response without logging or returning provider-controlled text.
+            await response.text();
+            console.error('[SMS] Provider rejected delivery', { status: response.status });
+            return { success: false, error: 'SMS provider rejected delivery' };
         }
 
         const data = await response.json();
         return { success: true, messageId: data.sid };
     } catch (error) {
-        console.error('SMS sending failed:', error);
-        return { success: false, error: String(error) };
+        console.error('[SMS] Delivery failed', {
+            errorType: error instanceof Error ? error.name : 'UnknownError',
+        });
+        return { success: false, error: 'SMS delivery failed' };
     }
 }
 

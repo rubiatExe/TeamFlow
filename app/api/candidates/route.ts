@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
 import { loadCandidatesFromSupabase, deleteCandidateFromSupabase } from '@/lib/db/supabase';
+import { guardLegacyDemoRoute } from '@/lib/http/legacy-demo-route';
 
 // This API route proxies Supabase requests from the client securely.
 // Because it runs on the server, `getSupabase()` in `lib/db/supabase.ts` will use
 // the `SUPABASE_SERVICE_ROLE_KEY` and bypass any Row Level Security (RLS) restrictions!
 
 export async function GET(req: Request) {
+    const blocked = guardLegacyDemoRoute();
+    if (blocked) return blocked;
+
     const { searchParams } = new URL(req.url);
     const merchantId = searchParams.get('merchant_id') || '00000000-0000-0000-0000-000000000001';
     
@@ -15,6 +19,9 @@ export async function GET(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+    const blocked = guardLegacyDemoRoute();
+    if (blocked) return blocked;
+
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
     

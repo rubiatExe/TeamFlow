@@ -8,17 +8,20 @@ does not add another queue or execution deadline around the bounded runtime.
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import os
 import re
 import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -29,6 +32,16 @@ from .composition import (
     TenantScopedHiringRuntime,
 )
 from .contracts import HiringAgentOutput, HiringAgentRequest
+from .resume_review.api_contracts import ResumeReviewRequest, ResumeReviewResponse
+from .resume_review.confidence import ConfidencePolicyError, load_default_confidence_policy
+from .resume_review.hitl.api import HitlReviewService, build_hitl_router
+from .resume_review.hitl.runtime import HumanReviewRuntime
+from .resume_review.runtime import (
+    ResumeReviewWorkflowBusyError,
+    ResumeReviewWorkflowExecutionError,
+    ResumeReviewWorkflowRequestError,
+    ResumeReviewWorkflowTimeoutError,
+)
 from .runtime import (
     HiringWorkflowBusyError,
     HiringWorkflowDependencyError,
@@ -49,10 +62,15 @@ _SECURITY_HEADERS = {
 _CANONICAL_CONTENT_LENGTH = re.compile(rb"^(?:0|[1-9][0-9]*)$")
 _MAX_BODY_FRAMES = 64
 _BODY_FRAME_YIELD_INTERVAL = 8
+logger = logging.getLogger(__name__)
 
 
 class HiringHTTPConfigurationError(ValueError):
     """A sanitized HTTP boundary configuration failure."""
+
+
+class ResumeReviewWorkflowRunner(Protocol):
+    async def invoke(self, request: ResumeReviewRequest) -> ResumeReviewResponse: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +80,7 @@ class HiringHTTPSettings:
     service_token: str = field(repr=False)
     environment: str = "development"
     max_request_bytes: int = 65_536
+    max_decision_request_bytes: int = 524_288
     body_timeout_seconds: float = 5.0
 
     def __post_init__(self) -> None:
@@ -85,6 +104,11 @@ class HiringHTTPSettings:
             or not 4_096 <= self.max_request_bytes <= 262_144
         ):
             raise HiringHTTPConfigurationError("hiring_http_configuration_invalid")
+        if (
+            type(self.max_decision_request_bytes) is not int
+            or not 262_144 <= self.max_decision_request_bytes <= 1_048_576
+        ):
+            raise HiringHTTPConfigurationError("hiring_http_configuration_invalid")
         if type(self.body_timeout_seconds) not in {int, float}:
             raise HiringHTTPConfigurationError("hiring_http_configuration_invalid")
         try:
@@ -104,16 +128,27 @@ class HiringHTTPSettings:
             token = environment.get("HIRING_AGENT_TOKEN", "")
             runtime_environment = environment.get("ENVIRONMENT", "development")
             raw_bytes = environment.get("HIRING_AGENT_MAX_REQUEST_BYTES", "65536")
+            raw_decision_bytes = environment.get(
+                "TEAMFLOW_HITL_MAX_DECISION_REQUEST_BYTES",
+                "524288",
+            )
             raw_timeout = environment.get("HIRING_AGENT_BODY_TIMEOUT_SECONDS", "5")
             if any(
                 type(value) is not str
-                for value in (token, runtime_environment, raw_bytes, raw_timeout)
+                for value in (
+                    token,
+                    runtime_environment,
+                    raw_bytes,
+                    raw_decision_bytes,
+                    raw_timeout,
+                )
             ):
                 raise ValueError
             return cls(
                 service_token=token,
                 environment=runtime_environment,
                 max_request_bytes=int(raw_bytes),
+                max_decision_request_bytes=int(raw_decision_bytes),
                 body_timeout_seconds=float(raw_timeout),
             )
         except Exception:
@@ -208,6 +243,14 @@ class HiringHTTPBoundary:
             await self._app(scope, receive, secured_send)
             return
 
+        request_limit = self._settings.max_request_bytes
+        if (
+            scope.get("method") == "PUT"
+            and path.startswith("/v2/resume-review-runs/")
+            and path.endswith("/decision")
+        ):
+            request_limit = self._settings.max_decision_request_bytes
+
         content_types = _header_values(scope, b"content-type")
         if len(content_types) != 1 or content_types[0] != b"application/json":
             await _send_json(
@@ -254,7 +297,7 @@ class HiringHTTPBoundary:
                     send=secured_send,
                 )
                 return
-            if declared_content_length > self._settings.max_request_bytes:
+            if declared_content_length > request_limit:
                 await _send_json(
                     {"error": "Request body is too large", "code": "request_too_large"},
                     status_code=413,
@@ -282,7 +325,7 @@ class HiringHTTPBoundary:
                     if frame_count > _MAX_BODY_FRAMES:
                         raise ValueError
                     next_total = total_bytes + len(body)
-                    exceeds_byte_limit = next_total > self._settings.max_request_bytes
+                    exceeds_byte_limit = next_total > request_limit
                     if (
                         exceeds_byte_limit
                         or declared_content_length is not None
@@ -361,15 +404,36 @@ def create_hiring_app(
     runtime: TenantScopedHiringRuntime,
     *,
     settings: HiringHTTPSettings,
+    resume_review_workflow: ResumeReviewWorkflowRunner | None = None,
+    hitl_review_service: HitlReviewService | None = None,
+    hitl_runtime: HumanReviewRuntime | None = None,
 ) -> FastAPI:
-    """Expose an already-composed tenant runtime without duplicating its budgets."""
+    """Expose already-composed runtimes without duplicating their budgets."""
 
     if (
         not isinstance(runtime, TenantScopedHiringRuntime)
         or not isinstance(settings, HiringHTTPSettings)
         or settings.environment != runtime.environment
+        or hitl_review_service is not None
+        and hitl_runtime is not None
     ):
         raise HiringHTTPConfigurationError("hiring_http_configuration_invalid")
+    review_invocation = None
+    if resume_review_workflow is not None:
+        try:
+            review_invocation = resume_review_workflow.invoke
+        except Exception:
+            review_invocation = None
+        if not callable(review_invocation):
+            raise HiringHTTPConfigurationError("hiring_http_configuration_invalid")
+
+    resolved_hitl_service = (
+        hitl_review_service
+        if hitl_review_service is not None
+        else hitl_runtime.service
+        if hitl_runtime is not None
+        else None
+    )
 
     app = FastAPI(
         title="TeamFlow Hiring Agent",
@@ -377,9 +441,34 @@ def create_hiring_app(
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=hitl_runtime.lifespan if hitl_runtime is not None else None,
     )
     app.add_middleware(HiringHTTPBoundary, settings=settings)
     app.state.runtime = runtime
+    app.state.resume_review_invocation = review_invocation
+    app.state.hitl_runtime = hitl_runtime
+    try:
+        load_default_confidence_policy()
+        app.state.confidence_policy_ready = True
+    except ConfidencePolicyError:
+        logger.error("Default confidence policy failed startup validation")
+        app.state.confidence_policy_ready = False
+
+    FastAPIInstrumentor.instrument_app(
+        app,
+        excluded_urls="health,ready,version",
+        http_capture_headers_server_request=[],
+        http_capture_headers_server_response=[],
+        http_capture_headers_sanitize_fields=[
+            "authorization",
+            "cookie",
+            "set-cookie",
+            "x-agent-token",
+            "x-ocr-token",
+            "apikey",
+        ],
+    )
+    app.include_router(build_hitl_router(resolved_hitl_service))
 
     @app.exception_handler(RequestValidationError)
     async def sanitized_validation_error(
@@ -409,7 +498,8 @@ def create_hiring_app(
 
     @app.get("/ready")
     async def ready() -> JSONResponse:
-        is_ready = runtime.ready
+        hitl_ready = hitl_runtime is None or hitl_runtime.ready
+        is_ready = runtime.ready and app.state.confidence_policy_ready and hitl_ready
         return _json_response(
             {"status": "ready" if is_ready else "not_ready"},
             status_code=200 if is_ready else 503,
@@ -467,6 +557,51 @@ def create_hiring_app(
                 status_code=500,
             )
 
+    @app.post("/v1/resume-reviews", response_model=ResumeReviewResponse)
+    async def resume_review(
+        request: ResumeReviewRequest,
+    ) -> ResumeReviewResponse | JSONResponse:
+        invocation = app.state.resume_review_invocation
+        if invocation is None:
+            return _json_response(
+                {"error": "Workflow is unavailable", "code": "workflow_unavailable"},
+                status_code=503,
+            )
+        try:
+            return await invocation(request)
+        except asyncio.CancelledError:
+            raise
+        except ResumeReviewWorkflowBusyError:
+            return _json_response(
+                {"error": "Workflow is at capacity", "code": "workflow_busy"},
+                status_code=429,
+                headers={"Retry-After": "1"},
+            )
+        except ResumeReviewWorkflowTimeoutError:
+            return _json_response(
+                {"error": "Workflow deadline exceeded", "code": "workflow_timeout"},
+                status_code=504,
+            )
+        except ResumeReviewWorkflowRequestError as error:
+            tenant_mismatch = str(error) == "resume_review_tenant_scope_mismatch"
+            return _json_response(
+                {
+                    "error": "Forbidden" if tenant_mismatch else "Invalid request",
+                    "code": "tenant_scope_mismatch" if tenant_mismatch else "invalid_request",
+                },
+                status_code=403 if tenant_mismatch else 422,
+            )
+        except ResumeReviewWorkflowExecutionError:
+            return _json_response(
+                {"error": "Workflow failed", "code": "workflow_failed"},
+                status_code=502,
+            )
+        except Exception:
+            return _json_response(
+                {"error": "Workflow failed", "code": "workflow_failed"},
+                status_code=500,
+            )
+
     return app
 
 
@@ -474,5 +609,6 @@ __all__ = [
     "HiringHTTPBoundary",
     "HiringHTTPConfigurationError",
     "HiringHTTPSettings",
+    "ResumeReviewWorkflowRunner",
     "create_hiring_app",
 ]

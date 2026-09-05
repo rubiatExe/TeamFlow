@@ -11,6 +11,7 @@ import {
     TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { ParserOutput } from '@/lib/contracts/parser';
+import type { InviteRequest } from '@/lib/contracts/candidate';
 import { getRoleById } from '@/lib/domain/roles';
 
 interface CandidateCardProps {
@@ -28,30 +29,76 @@ const statusColors: Record<string, string> = {
     hired: 'bg-lime-100 text-lime-700',
 };
 
+type InviteResult =
+    | { success: true; delivery: 'accepted' | 'simulated'; message: string }
+    | { success: false; error: { message: string; retryable: boolean } };
+
+function parseInviteResult(value: unknown): InviteResult | null {
+    if (!value || typeof value !== 'object') return null;
+    const result = value as Record<string, unknown>;
+    if (
+        result.success === true
+        && (result.delivery === 'accepted' || result.delivery === 'simulated')
+        && typeof result.message === 'string'
+    ) {
+        return { success: true, delivery: result.delivery, message: result.message };
+    }
+    if (result.success !== false || !result.error || typeof result.error !== 'object') return null;
+    const error = result.error as Record<string, unknown>;
+    if (typeof error.message !== 'string' || typeof error.retryable !== 'boolean') return null;
+    return {
+        success: false,
+        error: { message: error.message, retryable: error.retryable },
+    };
+}
+
 export function CandidateCard({ candidateId, data, status = 'pending', onInvite }: CandidateCardProps) {
     const { candidate, score, red_flags } = data;
     const [inviting, setInviting] = useState(false);
+    const [inviteFeedback, setInviteFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+    const isDemoCandidate = candidateId?.startsWith('demo_') ?? false;
 
     const handleInvite = async () => {
         if (!candidateId) return;
+        if (!candidate.phone?.trim()) {
+            setInviteFeedback({
+                type: 'error',
+                message: 'This candidate has no phone number available for a text invitation.',
+            });
+            return;
+        }
         setInviting(true);
+        setInviteFeedback(null);
         try {
+            const inviteRequest: InviteRequest = {
+                candidateId,
+                candidateName: candidate.name,
+                candidatePhone: candidate.phone,
+                storeName: "Cocoa Bakery",
+            };
             const res = await fetch('/api/invite', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    candidateId,
-                    candidateName: candidate.name,
-                    candidateEmail: candidate.email,
-                    candidatePhone: candidate.phone,
-                    storeName: "Cocoa Bakery",
-                }),
+                body: JSON.stringify(inviteRequest),
             });
-            const data = await res.json();
-            console.log('[Invite Result]', data);
-            if (onInvite) onInvite(candidateId);
-        } catch (err) {
-            console.error('[Invite Error]', err);
+            const result = parseInviteResult(await res.json().catch(() => null));
+            if (!res.ok || !result?.success) {
+                setInviteFeedback({
+                    type: 'error',
+                    message: result && !result.success
+                        ? result.error.message
+                        : 'The invitation was not sent. Please try again.',
+                });
+                return;
+            }
+
+            setInviteFeedback({ type: 'success', message: result.message });
+            onInvite?.(candidateId);
+        } catch {
+            setInviteFeedback({
+                type: 'error',
+                message: 'The invitation service could not be reached. Please try again.',
+            });
         } finally {
             setInviting(false);
         }
@@ -74,9 +121,12 @@ export function CandidateCard({ candidateId, data, status = 'pending', onInvite 
                             {candidate.name}
                         </CardTitle>
                         {appliedRole && (
-                            <span className="text-xs text-stone-400 mt-0.5 inline-flex items-center gap-1">
+                            <span className="text-xs text-stone-600 mt-0.5 inline-flex items-center gap-1">
                                 {appliedRole.emoji} {appliedRole.title}
                             </span>
+                        )}
+                        {isDemoCandidate && (
+                            <span className="mt-1 block text-xs font-medium text-amber-800">Synthetic demo record</span>
                         )}
                     </div>
                     <Badge className={`${statusColors[status]} text-xs font-medium px-3 py-1 rounded-lg`}>
@@ -89,9 +139,13 @@ export function CandidateCard({ candidateId, data, status = 'pending', onInvite 
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <div className={`text-4xl font-bold cursor-help ${getScoreColor(score.total)} hover:scale-105 transition-transform`}>
+                                <button
+                                    type="button"
+                                    aria-label={`Demo fit score ${score.total}. Show score explanation`}
+                                    className={`min-h-11 min-w-11 rounded-lg text-4xl font-bold cursor-help focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-600 focus-visible:ring-offset-2 ${getScoreColor(score.total)} hover:scale-105 transition-transform`}
+                                >
                                     {score.total}
-                                </div>
+                                </button>
                             </TooltipTrigger>
                             <TooltipContent className="max-w-sm bg-white text-stone-700 border-stone-200 p-4 shadow-lg rounded-xl">
                                 <p className="font-semibold text-stone-800 text-base mb-2">Why this score?</p>
@@ -118,7 +172,7 @@ export function CandidateCard({ candidateId, data, status = 'pending', onInvite 
                             <div className="text-sm text-stone-600 font-medium">{candidate.city}</div>
                         )}
                         {candidate.email && (
-                            <div className="text-xs text-stone-400 truncate max-w-[160px]">{candidate.email}</div>
+                            <div className="text-xs text-stone-600 truncate max-w-[160px]">{candidate.email}</div>
                         )}
                     </div>
                 </div>
@@ -131,7 +185,7 @@ export function CandidateCard({ candidateId, data, status = 'pending', onInvite 
                             </Badge>
                         ))}
                         {candidate.skills.length > 4 && (
-                            <Badge variant="secondary" className="text-xs bg-stone-50 text-stone-400 px-2.5 py-0.5 rounded-md">
+                            <Badge variant="secondary" className="text-xs bg-stone-50 text-stone-600 px-2.5 py-0.5 rounded-md">
                                 +{candidate.skills.length - 4}
                             </Badge>
                         )}
@@ -149,17 +203,26 @@ export function CandidateCard({ candidateId, data, status = 'pending', onInvite 
                 )}
 
                 {(status === 'pending' || status === 'new') && onInvite && (
-                    <Button
-                        size="sm"
-                        className={`w-full mt-4 rounded-xl font-medium shadow-sm hover:shadow ${status === 'pending'
-                                ? 'bg-amber-500 hover:bg-amber-600 text-white'
-                                : 'bg-lime-500 hover:bg-lime-600 text-white'
-                            }`}
-                        onClick={handleInvite}
-                        disabled={inviting}
-                    >
-                        {inviting ? '📧 Sending...' : '📧 Send Invite Link'}
-                    </Button>
+                    <div className="mt-4">
+                        <Button
+                            size="sm"
+                            className={`min-h-11 w-full rounded-xl font-medium shadow-sm hover:shadow ${status === 'pending'
+                                    ? 'bg-amber-500 hover:bg-amber-600 text-stone-950'
+                                    : 'bg-lime-600 hover:bg-lime-700 text-white'
+                                }`}
+                            onClick={handleInvite}
+                            disabled={inviting || !candidate.phone}
+                        >
+                            {inviting ? 'Sending invitation…' : candidate.phone ? 'Send invite by text' : 'Phone number required'}
+                        </Button>
+                        <p
+                            role={inviteFeedback?.type === 'error' ? 'alert' : 'status'}
+                            aria-live="polite"
+                            className={`mt-2 min-h-5 text-xs ${inviteFeedback?.type === 'error' ? 'text-red-700' : 'text-lime-800'}`}
+                        >
+                            {inviteFeedback?.message}
+                        </p>
+                    </div>
                 )}
             </CardContent>
         </Card>

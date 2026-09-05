@@ -19,9 +19,57 @@ export class RequestBodyDeadlineError extends Error {
   }
 }
 
+export class InvalidRequestFramingError extends Error {
+  constructor() {
+    super('Request framing is invalid');
+    this.name = 'InvalidRequestFramingError';
+  }
+}
+
+export class UnsupportedJsonMediaTypeError extends Error {
+  constructor() {
+    super('Content-Type must be application/json');
+    this.name = 'UnsupportedJsonMediaTypeError';
+  }
+}
+
+const MAX_BODY_FRAMES = 64;
+const BODY_FRAME_YIELD_INTERVAL = 8;
+const CANONICAL_CONTENT_LENGTH = /^(?:0|[1-9][0-9]*)$/u;
+
 type BoundedJsonOptions = {
   signal?: AbortSignal;
 };
+
+/** Validate request framing before consuming a protected JSON body. */
+export function validateBoundedJsonRequestHeaders(
+  request: Pick<Request, 'headers'>,
+  maxBytes: number,
+): void {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    throw new RangeError('maxBytes must be a positive safe integer');
+  }
+  if (request.headers.get('content-type') !== 'application/json') {
+    throw new UnsupportedJsonMediaTypeError();
+  }
+
+  const contentLength = request.headers.get('content-length');
+  const transferEncoding = request.headers.get('transfer-encoding');
+  if (contentLength !== null && transferEncoding !== null) {
+    throw new InvalidRequestFramingError();
+  }
+  if (contentLength === null) return;
+  if (!CANONICAL_CONTENT_LENGTH.test(contentLength)) {
+    throw new InvalidRequestFramingError();
+  }
+  const parsedLength = Number(contentLength);
+  if (!Number.isSafeInteger(parsedLength)) {
+    throw new InvalidRequestFramingError();
+  }
+  if (parsedLength > maxBytes) {
+    throw new RequestBodyTooLargeError();
+  }
+}
 
 function cancelReader(
   reader: ReadableStreamDefaultReader<Uint8Array>,
@@ -83,20 +131,29 @@ export async function readBoundedJson(
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
+  let frameCount = 0;
   try {
     while (true) {
       const { done, value } = await readWithSignal(reader, options.signal);
       if (done) break;
+      frameCount += 1;
+      if (frameCount > MAX_BODY_FRAMES || !(value instanceof Uint8Array)) {
+        throw new InvalidRequestFramingError();
+      }
       totalBytes += value.byteLength;
       if (totalBytes > maxBytes) {
         throw new RequestBodyTooLargeError();
       }
       chunks.push(value);
+      if (frameCount % BODY_FRAME_YIELD_INTERVAL === 0) {
+        await new Promise<void>(resolve => setTimeout(resolve, 0));
+      }
     }
   } catch (error) {
     if (
       error instanceof RequestBodyDeadlineError ||
-      error instanceof RequestBodyTooLargeError
+      error instanceof RequestBodyTooLargeError ||
+      error instanceof InvalidRequestFramingError
     ) {
       cancelReader(reader);
     }
@@ -127,7 +184,7 @@ export async function readBoundedJsonResponse(
 ): Promise<unknown> {
   const contentLength = response.headers.get('content-length');
   if (contentLength !== null) {
-    if (!/^[0-9]+$/u.test(contentLength)) {
+    if (!CANONICAL_CONTENT_LENGTH.test(contentLength)) {
       throw new InvalidJsonResponseError();
     }
     const parsedLength = Number(contentLength);

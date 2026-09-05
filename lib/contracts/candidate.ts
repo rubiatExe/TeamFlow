@@ -7,3 +7,11 @@ export interface CandidateWithStatus {
     status: CandidateStatus;
     id: string;
 }
+
+export interface InviteRequest {
+    candidateId: string;
+    candidateName: string;
+    candidatePhone: string;
+    jobId?: string;
+    storeName?: string;
+}

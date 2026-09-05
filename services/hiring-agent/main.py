@@ -10,13 +10,13 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from teamflow_hiring_agent.composition import (
-    TenantScopedHiringRuntime,
-    compose_tenant_scoped_runtime,
-)
 from teamflow_hiring_agent.http_api import (
     HiringHTTPSettings,
     create_hiring_app,
+)
+from teamflow_hiring_agent.service_composition import (
+    HiringServiceComponents,
+    compose_hiring_service,
 )
 from teamflow_hiring_agent.telemetry import setup_telemetry
 
@@ -69,8 +69,8 @@ def build_app(
     environ: Mapping[str, str] | None = None,
     *,
     telemetry_initializer: Callable[[Mapping[str, str]], None] = setup_telemetry,
-    runtime_factory: Callable[[Mapping[str, str]], TenantScopedHiringRuntime] = (
-        compose_tenant_scoped_runtime
+    composition_factory: Callable[[Mapping[str, str]], HiringServiceComponents] = (
+        compose_hiring_service
     ),
     http_settings_factory: Callable[[Mapping[str, str]], HiringHTTPSettings] = (
         HiringHTTPSettings.from_env
@@ -81,17 +81,22 @@ def build_app(
 
     snapshot = _environment_snapshot(environ)
     telemetry_initializer(snapshot)
-    runtime = runtime_factory(snapshot)
+    components = composition_factory(snapshot)
     settings = http_settings_factory(snapshot)
-    return application_factory(runtime, settings=settings)
+    return application_factory(
+        components.hiring_runtime,
+        settings=settings,
+        resume_review_workflow=components.resume_review_workflow,
+        hitl_runtime=components.hitl_runtime,
+    )
 
 
 def main(
     environ: Mapping[str, str] | None = None,
     *,
     telemetry_initializer: Callable[[Mapping[str, str]], None] = setup_telemetry,
-    runtime_factory: Callable[[Mapping[str, str]], TenantScopedHiringRuntime] = (
-        compose_tenant_scoped_runtime
+    composition_factory: Callable[[Mapping[str, str]], HiringServiceComponents] = (
+        compose_hiring_service
     ),
     http_settings_factory: Callable[[Mapping[str, str]], HiringHTTPSettings] = (
         HiringHTTPSettings.from_env
@@ -109,7 +114,7 @@ def main(
     application = build_app(
         snapshot,
         telemetry_initializer=telemetry_initializer,
-        runtime_factory=runtime_factory,
+        composition_factory=composition_factory,
         http_settings_factory=http_settings_factory,
         application_factory=application_factory,
     )

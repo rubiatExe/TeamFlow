@@ -49,18 +49,36 @@ export interface CandidateRow {
     city?: string;
     status: string;
     resume_url: string;
-    resume_text?: string;  // raw markdown text from OCR Agent 1
+    resume_text?: string;  // raw markdown from the document processor
     fit_score?: number;
     analysis?: CandidateAnalysis;
     red_flags?: string[];
     summary?: string;
     source: string;
-    // pgvector: 768-dim embedding for semantic search (text-embedding-004)
+    // pgvector: 768-dim document embedding for semantic search
     // Supabase accepts this as a plain number[] and stores it in the vector(768) column
     embedding?: number[];
 }
 
+export class CandidateReviewRequiredError extends Error {
+    constructor() {
+        super('Candidate scores require an approved human-review revision');
+        this.name = 'CandidateReviewRequiredError';
+    }
+}
+
+export function assertCandidateHasNoUnreviewedScore(candidate: CandidateRow): void {
+    if (
+        candidate.fit_score !== undefined
+        || candidate.analysis !== undefined
+        || candidate.red_flags !== undefined
+    ) {
+        throw new CandidateReviewRequiredError();
+    }
+}
+
 export async function saveCandidateToSupabase(candidate: CandidateRow): Promise<string | null> {
+    assertCandidateHasNoUnreviewedScore(candidate);
     const db = getSupabase();
     if (!db) {
         console.log('[Supabase] Skipping save — not configured');
@@ -75,12 +93,16 @@ export async function saveCandidateToSupabase(candidate: CandidateRow): Promise<
             .single();
 
         if (error) {
-            console.error('[Supabase] Error saving candidate:', error);
+            console.error('[Supabase] Candidate save failed', {
+                code: typeof error.code === 'string' ? error.code.slice(0, 80) : 'unknown',
+            });
             return null;
         }
         return data?.id || null;
     } catch (err) {
-        console.error('[Supabase] Unexpected error:', err);
+        console.error('[Supabase] Candidate save failed unexpectedly', {
+            errorType: err instanceof Error ? err.name : 'UnknownError',
+        });
         return null;
     }
 }
