@@ -58,3 +58,72 @@ jobs:
 
       - name: Document processor tests
         run: pytest services/document-processor/tests
+
+  hiring-agent-checks:
+    name: Hiring Agent — Database, Tests & Image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+
+    services:
+      supabase-postgres:
+        image: public.ecr.aws/supabase/postgres:17.6.1.054@sha256:982abcf1b97c2787f002327d0b30224f1bad819748a22bb1e979bb42dd701a48
+        env:
+          POSTGRES_PASSWORD: teamflow_supabase_replay
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U supabase_admin -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_NO_INPUT: "1"
+      TEST_SUPABASE_POSTGRES_DSN: >-
+        postgresql://supabase_admin:teamflow_supabase_replay@127.0.0.1:5433/postgres?sslmode=disable
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: 3.11.16
+          cache: pip
+          cache-dependency-path: services/hiring-agent/requirements-dev.lock
+
+      - name: Install hash-locked dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          --requirement services/hiring-agent/requirements-dev.lock
+
+      - name: Ruff — lint and format hiring agent
+        run: |
+          ruff check services/hiring-agent scripts/pytest-no-skips.py
+          ruff format --check services/hiring-agent scripts/pytest-no-skips.py
+
+      - name: Hiring-agent unit tests (no skips)
+        working-directory: services/hiring-agent
+        run: >-
+          python ../../scripts/pytest-no-skips.py -q -rs tests
+          --ignore=tests/test_hiring_reader_migration_phase19.py
+
+      - name: Phase 19 local Supabase replay (no skips)
+        working-directory: services/hiring-agent
+        run: >-
+          python ../../scripts/pytest-no-skips.py -q -rs
+          tests/test_hiring_reader_migration_phase19.py
+
+      - name: Build hiring-agent image
+        run: docker build --tag teamflow-hiring-agent:ci services/hiring-agent
+
+      - name: Verify non-root image runtime
+        run: |
+          runtime_user="$(docker image inspect teamflow-hiring-agent:ci --format '{{.Config.User}}')"
+          test "$runtime_user" = "10001:10001"
