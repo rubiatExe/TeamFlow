@@ -1,0 +1,15 @@
+# Send only the production hiring runtime to the Docker daemon.
+**
+!main.py
+!requirements.lock
+!teamflow_hiring_agent/
+!teamflow_hiring_agent/**
+
+# Later services and offline evaluation code are separate deployment units.
+teamflow_hiring_agent/api.py
+teamflow_hiring_agent/evaluation/
+teamflow_hiring_agent/resume_review/
+
+# Never package generated Python artifacts.
+teamflow_hiring_agent/**/__pycache__/
+teamflow_hiring_agent/**/*.py[cod]

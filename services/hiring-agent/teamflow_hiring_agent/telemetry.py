@@ -120,7 +120,7 @@ def _build_trace_provider(
     return provider
 
 
-def setup_telemetry() -> None:
+def setup_telemetry(environ: Mapping[str, str] | None = None) -> None:
     """Initialize tracing once, without a partial production fallback."""
 
     global _telemetry_initialized
@@ -128,11 +128,12 @@ def setup_telemetry() -> None:
         if _telemetry_initialized:
             return
 
-        environment = _environment_setting()
-        service_name = _service_name(environment=environment)
+        settings = os.environ if environ is None else environ
+        environment = _environment_setting(settings)
+        service_name = _service_name(environment=environment, environ=settings)
         default_sample_ratio = 0.1 if environment == "production" else 1.0
         sample_ratio = _bounded_sample_ratio(
-            os.getenv("OTEL_TRACES_SAMPLER_ARG", str(default_sample_ratio))
+            settings.get("OTEL_TRACES_SAMPLER_ARG", str(default_sample_ratio))
         )
         provider = _build_trace_provider(
             _resource(service_name=service_name, environment=environment),

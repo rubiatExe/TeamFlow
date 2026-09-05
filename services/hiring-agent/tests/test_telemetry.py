@@ -226,6 +226,46 @@ def test_setup_installs_then_marks_initialized_and_is_idempotent(
     }
 
 
+def test_setup_uses_the_supplied_environment_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = StubProvider("trace")
+    installed: dict[str, StubProvider] = {}
+    observed: dict[str, Any] = {}
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("OTEL_TRACES_SAMPLER_ARG", "not-a-number")
+
+    def build(resource: Resource, **kwargs: Any) -> StubProvider:
+        observed["resource"] = resource
+        observed.update(kwargs)
+        return provider
+
+    monkeypatch.setattr(telemetry, "_build_trace_provider", build)
+    monkeypatch.setattr(
+        telemetry.trace,
+        "set_tracer_provider",
+        lambda candidate: installed.__setitem__("trace", candidate),
+    )
+    monkeypatch.setattr(telemetry.trace, "get_tracer_provider", lambda: installed.get("trace"))
+
+    telemetry.setup_telemetry(
+        {
+            "ENVIRONMENT": "test",
+            "HIRING_AGENT_OTEL_SERVICE_NAME": "hiring.snapshot",
+            "OTEL_TRACES_SAMPLER_ARG": "0.25",
+        }
+    )
+
+    assert observed["environment"] == "test"
+    assert observed["sample_ratio"] == 0.25
+    assert dict(observed["resource"].attributes) == {
+        "service.name": "hiring.snapshot",
+        "service.version": "2.1.0",
+        "deployment.environment": "test",
+        "teamflow.component": "hiring-workflow",
+    }
+
+
 def test_build_failure_leaves_initialization_false_and_allows_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
