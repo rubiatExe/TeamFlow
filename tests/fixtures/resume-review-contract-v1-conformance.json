@@ -1,0 +1,106 @@
+{
+  "text_cases": [
+    {
+      "name": "ascii-at-bound",
+      "target": "bounded_text",
+      "unit": "a",
+      "repeat": 1000,
+      "accepted": true
+    },
+    {
+      "name": "astral-at-bound",
+      "target": "bounded_text",
+      "unit": "😀",
+      "repeat": 1000,
+      "accepted": true
+    },
+    {
+      "name": "astral-over-bound",
+      "target": "bounded_text",
+      "unit": "😀",
+      "repeat": 1001,
+      "accepted": false
+    },
+    {
+      "name": "exact-quote-astral-at-bound",
+      "target": "exact_quote",
+      "unit": "😀",
+      "repeat": 2000,
+      "accepted": true
+    },
+    {
+      "name": "exact-quote-astral-over-bound",
+      "target": "exact_quote",
+      "unit": "😀",
+      "repeat": 2001,
+      "accepted": false
+    },
+    {
+      "name": "exact-quote-too-short",
+      "target": "exact_quote",
+      "unit": "a",
+      "repeat": 7,
+      "accepted": false
+    },
+    {
+      "name": "unicode-next-line-is-blank",
+      "target": "bounded_text",
+      "unit": "\u0085",
+      "repeat": 1,
+      "accepted": false
+    },
+    {
+      "name": "information-separator-is-blank",
+      "target": "bounded_text",
+      "unit": "\u001c",
+      "repeat": 1,
+      "accepted": false
+    },
+    {
+      "name": "zero-width-space-is-blank",
+      "target": "bounded_text",
+      "unit": "\u200b",
+      "repeat": 1,
+      "accepted": false
+    },
+    {
+      "name": "byte-order-mark-is-blank",
+      "target": "bounded_text",
+      "unit": "\ufeff",
+      "repeat": 1,
+      "accepted": false
+    }
+  ],
+  "integer_cases": [
+    {
+      "name": "integer",
+      "value": 82,
+      "accepted": true
+    },
+    {
+      "name": "integral-decimal",
+      "value": 82.0,
+      "accepted": true
+    },
+    {
+      "name": "integral-exponent",
+      "value": 8.2e1,
+      "accepted": true
+    },
+    {
+      "name": "fractional",
+      "value": 82.5,
+      "accepted": false
+    },
+    {
+      "name": "numeric-string",
+      "value": "82",
+      "accepted": false
+    },
+    {
+      "name": "boolean",
+      "value": true,
+      "accepted": false
+    }
+  ]
+}
