@@ -14,6 +14,7 @@ import {
 } from '@/lib/contracts/resume-review-api';
 import { DEMO_MERCHANT_ID } from '@/lib/db/supabase';
 import {
+  createDeadlineSignal,
   InvalidRequestFramingError,
   readBoundedJson,
   RequestBodyDeadlineError,
@@ -43,13 +44,11 @@ export async function POST(req: NextRequest) {
   }
 
   let body: unknown;
+  const deadline = createDeadlineSignal(MAX_BODY_READ_MILLISECONDS, req.signal);
   try {
     validateBoundedJsonRequestHeaders(req, MAX_REVIEW_REQUEST_BYTES);
     body = await readBoundedJson(req, MAX_REVIEW_REQUEST_BYTES, {
-      signal: AbortSignal.any([
-        req.signal,
-        AbortSignal.timeout(MAX_BODY_READ_MILLISECONDS),
-      ]),
+      signal: deadline.signal,
     });
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) {
@@ -65,6 +64,8 @@ export async function POST(req: NextRequest) {
       return json({ error: 'Invalid request framing', requestId }, 400);
     }
     return json({ error: 'Invalid JSON request', requestId }, 400);
+  } finally {
+    deadline.dispose();
   }
   const parsed = ResumeReviewPublicRequestSchema.safeParse(body);
   if (!parsed.success) {

@@ -15,6 +15,7 @@ import {
 } from '../contracts/resume-review-hitl-api.ts';
 import { StartResumeReviewRunRequestSchema } from '../contracts/resume-review-hitl.ts';
 import {
+  createDeadlineSignal,
   InvalidRequestFramingError,
   readBoundedJson,
   RequestBodyDeadlineError,
@@ -104,10 +105,13 @@ async function boundedBody(
   if (!Number.isSafeInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > 5_000) {
     return { ok: false, response: invalidRequest() };
   }
-  const signal = AbortSignal.timeout(deadlineMs);
+  const deadline = createDeadlineSignal(deadlineMs, request.signal);
   try {
     validateBoundedJsonRequestHeaders(request, maxBytes);
-    return { ok: true, value: await readBoundedJson(request, maxBytes, { signal }) };
+    return {
+      ok: true,
+      value: await readBoundedJson(request, maxBytes, { signal: deadline.signal }),
+    };
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) {
       return {
@@ -140,6 +144,8 @@ async function boundedBody(
       return { ok: false, response: invalidRequest() };
     }
     return { ok: false, response: invalidRequest() };
+  } finally {
+    deadline.dispose();
   }
 }
 

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  createDeadlineSignal,
   InvalidRequestFramingError,
   InvalidJsonResponseError,
   readBoundedJson,
@@ -149,10 +150,15 @@ test('stream cancellation failures cannot replace typed limit or deadline errors
     }),
     duplex: 'half',
   } as RequestInit & { duplex: 'half' });
-  await assert.rejects(
-    readBoundedJson(stalled, 64, { signal: AbortSignal.timeout(5) }),
-    RequestBodyDeadlineError,
-  );
+  const deadline = createDeadlineSignal(5);
+  try {
+    await assert.rejects(
+      readBoundedJson(stalled, 64, { signal: deadline.signal }),
+      RequestBodyDeadlineError,
+    );
+  } finally {
+    deadline.dispose();
+  }
 });
 
 test('rejects malformed JSON and malformed UTF-8', async () => {

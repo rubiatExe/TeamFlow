@@ -132,9 +132,22 @@ const checks = [
     ],
   },
   {
+    file: 'lib/http/bounded-json.ts',
+    required: [
+      'export function createDeadlineSignal(',
+      'timer = setTimeout(() => controller.abort(), deadlineMs);',
+      'clearTimeout(timer);',
+      "parentSignal?.addEventListener('abort', abortFromParent, { once: true })",
+      "parentSignal?.removeEventListener('abort', abortFromParent)",
+    ],
+    forbidden: ['AbortSignal.timeout('],
+  },
+  {
     file: 'lib/http/hiring-agent-route.ts',
     required: [
       'authorizeHiringAgentRoute',
+      'createDeadlineSignal',
+      'deadline.dispose();',
       'readBoundedJson',
       'HiringAgentRequestSchema.safeParse',
       'HiringAgentServiceRequestSchema.safeParse',
@@ -199,11 +212,32 @@ const checks = [
     required: [
       'const MAX_DECISION_REQUEST_BYTES = 524_288;',
       'const MAX_BODY_READ_MILLISECONDS = 5_000;',
-      'AbortSignal.timeout(deadlineMs)',
-      'readBoundedJson(request, maxBytes, { signal })',
+      'const deadline = createDeadlineSignal(deadlineMs, request.signal);',
+      'readBoundedJson(request, maxBytes, { signal: deadline.signal })',
+      'deadline.dispose();',
       'error instanceof RequestBodyDeadlineError',
       'handleListPendingResumeReviews',
     ],
+    forbidden: ['AbortSignal.timeout(deadlineMs)'],
+  },
+  {
+    file: 'lib/ai/hiring-agent-client.ts',
+    required: [
+      'const deadline = createDeadlineSignal(timeoutMs);',
+      'signal: deadline.signal',
+      'deadline.dispose();',
+    ],
+    forbidden: ['AbortSignal.timeout('],
+  },
+  {
+    file: 'lib/ai/resume-review-client.ts',
+    required: [
+      'const deadline = createDeadlineSignal(50_000);',
+      'signal: deadline.signal',
+      'deadline.dispose();',
+      'error instanceof RequestBodyDeadlineError',
+    ],
+    forbidden: ['AbortSignal.timeout('],
   },
   {
     file: 'lib/ai/resume-review-hitl-client.ts',
@@ -449,6 +483,8 @@ const checks = [
     required: [
       'ResumeReviewPublicRequestSchema.safeParse',
       'authorizeHiringAgentRoute',
+      'createDeadlineSignal',
+      'deadline.dispose();',
       'DEMO_MERCHANT_ID',
       'runResumeReview',
       'RESUME_REVIEW_PERSIST_RESULTS',

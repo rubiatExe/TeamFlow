@@ -61,7 +61,7 @@ updates:
       timezone: America/New_York
     open-pull-requests-limit: 3
 
-  - package-ecosystem: docker
+  - package-ecosystem: docker-compose
     directory: /ops/observability
     schedule:
       interval: weekly

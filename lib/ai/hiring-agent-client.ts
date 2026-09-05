@@ -4,6 +4,7 @@ import {
   type HiringAgentResponse,
 } from '../contracts/hiring-agent.ts';
 import {
+  createDeadlineSignal,
   readBoundedJsonResponse,
   RequestBodyDeadlineError,
 } from '../http/bounded-json.ts';
@@ -72,15 +73,16 @@ export async function runLangGraphHiringAgent(
   ) {
     throw new HiringAgentServiceError(503);
   }
-  const signal = AbortSignal.timeout(timeoutMs);
+  const requestBody = JSON.stringify(body);
+  const deadline = createDeadlineSignal(timeoutMs);
 
   const requestOptions: TraceableRequestInit = {
     method: 'POST',
     headers,
-    body: JSON.stringify(body),
+    body: requestBody,
     cache: 'no-store',
     redirect: 'error',
-    signal,
+    signal: deadline.signal,
     opentelemetry: {
       // Current instrumentation still registers baggage propagation. Keep this
       // private adapter isolated until tracecontext-only propagation is committed.
@@ -99,7 +101,7 @@ export async function runLangGraphHiringAgent(
     payload = await readBoundedJsonResponse(
       response,
       MAX_HIRING_AGENT_RESPONSE_BYTES,
-      { signal },
+      { signal: deadline.signal },
     );
   } catch (error) {
     if (error instanceof HiringAgentServiceError) throw error;
@@ -110,6 +112,8 @@ export async function runLangGraphHiringAgent(
       throw new HiringAgentServiceError(504);
     }
     throw new HiringAgentServiceError(502);
+  } finally {
+    deadline.dispose();
   }
 
   if (!response.ok) {

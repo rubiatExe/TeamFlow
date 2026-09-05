@@ -15,6 +15,8 @@ import {
   type HiringAgentServiceRequest,
 } from '../contracts/hiring-agent.ts';
 import {
+  createDeadlineSignal,
+  type DeadlineSignal,
   readBoundedJson,
   RequestBodyDeadlineError,
   RequestBodyTooLargeError,
@@ -58,7 +60,10 @@ function hasCanonicalJsonContentType(request: Request): boolean {
   return request.headers.get('content-type') === 'application/json';
 }
 
-function bodyReadSignal(request: Request, deadlineMs: number): AbortSignal | null {
+function bodyReadDeadline(
+  request: Request,
+  deadlineMs: number,
+): DeadlineSignal | null {
   if (
     !Number.isSafeInteger(deadlineMs) ||
     deadlineMs < 1 ||
@@ -66,7 +71,7 @@ function bodyReadSignal(request: Request, deadlineMs: number): AbortSignal | nul
   ) {
     return null;
   }
-  return AbortSignal.any([request.signal, AbortSignal.timeout(deadlineMs)]);
+  return createDeadlineSignal(deadlineMs, request.signal);
 }
 
 export async function handleHiringAgentRequest(
@@ -88,17 +93,19 @@ export async function handleHiringAgentRequest(
   const contentLengthFailure = requestContentLengthFailure(request, requestId);
   if (contentLengthFailure) return contentLengthFailure;
 
-  const signal = bodyReadSignal(
+  const deadline = bodyReadDeadline(
     request,
     dependencies.bodyDeadlineMs ?? MAX_BODY_READ_MILLISECONDS,
   );
-  if (signal === null) {
+  if (deadline === null) {
     return json({ error: 'Hiring-agent server configuration is invalid', requestId }, 503);
   }
 
   let body: unknown;
   try {
-    body = await readBoundedJson(request, MAX_HIRING_AGENT_REQUEST_BYTES, { signal });
+    body = await readBoundedJson(request, MAX_HIRING_AGENT_REQUEST_BYTES, {
+      signal: deadline.signal,
+    });
   } catch (error) {
     if (error instanceof RequestBodyTooLargeError) {
       return json({ error: 'Request body is too large', requestId }, 413);
@@ -107,6 +114,8 @@ export async function handleHiringAgentRequest(
       return json({ error: 'Request body deadline exceeded', requestId }, 408);
     }
     return json({ error: 'Invalid JSON request', requestId }, 400);
+  } finally {
+    deadline.dispose();
   }
 
   const parsedRequest = HiringAgentRequestSchema.safeParse(body);

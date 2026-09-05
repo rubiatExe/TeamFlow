@@ -40,6 +40,16 @@ function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 }
 
+async function fetchWithDeadline(url, options, deadlineMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), deadlineMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function waitForServer(baseUrl, child, logs) {
   const deadline = Date.now() + 45_000;
   while (Date.now() < deadline) {
@@ -53,7 +63,7 @@ async function waitForServer(baseUrl, child, logs) {
       throw new Error(`Next server exited before readiness:\n${logs.value}`);
     }
     try {
-      const response = await fetch(baseUrl, { signal: AbortSignal.timeout(2_000) });
+      const response = await fetchWithDeadline(baseUrl, {}, 2_000);
       if (response.status < 500) return baseUrl;
     } catch {
       // Compilation and socket startup are expected to race this probe.

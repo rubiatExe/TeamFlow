@@ -3,7 +3,11 @@ import {
   type ResumeReviewResponse,
   type ResumeReviewServiceRequest,
 } from '../contracts/resume-review-api.ts';
-import { readBoundedJsonResponse } from '../http/bounded-json.ts';
+import {
+  createDeadlineSignal,
+  readBoundedJsonResponse,
+  RequestBodyDeadlineError,
+} from '../http/bounded-json.ts';
 import {
   resolveTrustedServiceBaseUrl,
   ServiceUrlConfigurationError,
@@ -53,14 +57,15 @@ export async function runResumeReview(
     'Content-Type': 'application/json',
     'X-Agent-Token': serviceToken,
   };
-  const signal = AbortSignal.timeout(50_000);
+  const requestBody = JSON.stringify(body);
+  const deadline = createDeadlineSignal(50_000);
   const options: TraceableRequestInit = {
     method: 'POST',
     headers,
-    body: JSON.stringify(body),
+    body: requestBody,
     cache: 'no-store',
     redirect: 'error',
-    signal,
+    signal: deadline.signal,
     opentelemetry: {
       propagateContext: true,
       spanName: 'resume_review.run',
@@ -76,14 +81,19 @@ export async function runResumeReview(
     payload = await readBoundedJsonResponse(
       response,
       MAX_RESUME_REVIEW_RESPONSE_BYTES,
-      { signal },
+      { signal: deadline.signal },
     );
   } catch (error) {
     if (error instanceof ResumeReviewServiceError) throw error;
-    if (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name)) {
+    if (
+      error instanceof RequestBodyDeadlineError ||
+      (error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name))
+    ) {
       throw new ResumeReviewServiceError(504);
     }
     throw new ResumeReviewServiceError(502);
+  } finally {
+    deadline.dispose();
   }
   if (!response.ok) {
     throw new ResumeReviewServiceError(response.status);

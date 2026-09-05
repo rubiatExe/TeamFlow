@@ -5,11 +5,24 @@ const baseUrl = new URL(process.env.TEAMFLOW_SMOKE_BASE_URL).origin;
 const mode = process.env.TEAMFLOW_SMOKE_MODE;
 
 async function request(path, options) {
-  return fetch(new URL(path, baseUrl), {
-    ...options,
-    redirect: 'manual',
-    signal: AbortSignal.timeout(10_000),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(new URL(path, baseUrl), {
+      ...options,
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+    const body = await response.arrayBuffer();
+    const bodylessStatus = [101, 204, 205, 304].includes(response.status);
+    return new Response(bodylessStatus ? null : body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function assertSecurityHeaders(response) {

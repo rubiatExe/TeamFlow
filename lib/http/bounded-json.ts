@@ -41,6 +41,43 @@ type BoundedJsonOptions = {
   signal?: AbortSignal;
 };
 
+export type DeadlineSignal = Readonly<{
+  signal: AbortSignal;
+  dispose: () => void;
+}>;
+
+/** Create an abort deadline backed by a referenced timer and explicit cleanup. */
+export function createDeadlineSignal(
+  deadlineMs: number,
+  parentSignal?: AbortSignal,
+): DeadlineSignal {
+  if (!Number.isSafeInteger(deadlineMs) || deadlineMs < 1) {
+    throw new RangeError('deadlineMs must be a positive safe integer');
+  }
+
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort(parentSignal?.reason);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  if (parentSignal?.aborted) {
+    abortFromParent();
+  } else {
+    parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+    timer = setTimeout(() => controller.abort(), deadlineMs);
+  }
+
+  let disposed = false;
+  return {
+    signal: controller.signal,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      if (timer !== undefined) clearTimeout(timer);
+      parentSignal?.removeEventListener('abort', abortFromParent);
+    },
+  };
+}
+
 /** Validate request framing before consuming a protected JSON body. */
 export function validateBoundedJsonRequestHeaders(
   request: Pick<Request, 'headers'>,
