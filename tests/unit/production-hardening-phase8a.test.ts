@@ -163,12 +163,13 @@ test('magic links remain an explicit local demo and have no production fallback 
   assert.equal(verifyMagicToken(token)?.candidateId, 'demo-candidate');
 });
 
-test('manager and candidate portals are excluded from the production artifact', () => {
-  const managerPage = readFileSync('app/page.tsx', 'utf8');
+test('public synthetic search is available while the legacy candidate portal remains gated', () => {
+  const publicPage = readFileSync('app/page.tsx', 'utf8');
   const candidatePage = readFileSync('app/apply/page.tsx', 'utf8');
 
-  for (const source of [managerPage, candidatePage]) {
-    assert.match(source, /legacyDemoRoutesEnabled\(\)/u);
-    assert.match(source, /notFound\(\)/u);
-  }
+  assert.match(publicPage, /RecruiterSemanticSearch/u);
+  assert.match(publicPage, /Synthetic data · read-only/u);
+  assert.doesNotMatch(publicPage, /ManagerDashboard|legacyDemoRoutesEnabled|notFound\(\)/u);
+  assert.match(candidatePage, /legacyDemoRoutesEnabled\(\)/u);
+  assert.match(candidatePage, /notFound\(\)/u);
 });

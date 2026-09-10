@@ -11,6 +11,18 @@
 > [`config/ai-model-contract.json`](../config/ai-model-contract.json) before using this
 > script.
 
+## Recommended public demo (3 minutes)
+
+Start with [https://team-floww.vercel.app/](https://team-floww.vercel.app/). This is the
+safe hiring-manager demo: it searches eight fictional profiles, returns literal source
+citations, labels whether the request used live Gemini embeddings or the deterministic
+fallback, and performs no hiring action. Follow
+[`public-semantic-search-demo.md`](public-semantic-search-demo.md) for the exact script
+and truth boundary.
+
+Use the longer local walkthrough below only when you have separately started and
+verified its Next.js, document-processor, hiring-agent, Supabase, and cloud dependencies.
+
 ---
 
 ## 📋 Pre-Call Setup (2 Minutes Before Zoom)
@@ -25,7 +37,8 @@ Ensure your desktop is organized cleanly with no personal notifications before s
 - **Terminal 3 (LangGraph Hiring Workflow)**: `cd services/hiring-agent && HIRING_AGENT_TOKEN=local-dev-token AGENT_ALLOW_WRITES=false uvicorn main:app --port 8080`
 
 ### 2. Browser Tabs (Arranged Left-to-Right)
-1. 🌐 **TeamFlow Web App**: `http://localhost:3000` (Dashboard & Hiring Funnel)
+1. 🌐 **Public Evidence Demo**: [team-floww.vercel.app](https://team-floww.vercel.app/)
+   (semantic search with synthetic profiles and literal citations)
 2. 🗄️ **Supabase Dashboard**: Table Editor (`candidates`, `applications`, `merchants`)
 3. 🐙 **GitHub Repository**: [rubiatExe/TeamFlow](https://github.com/rubiatExe/TeamFlow) (Actions tab & `.github/workflows/deploy-python-service.yml`)
 4. ☁️ **Google Cloud Console**: Secret Manager & Workload Identity Federation page

@@ -55,7 +55,7 @@ function assertNamedServerRenderedControls(html) {
 }
 
 if (mode === 'development') {
-  test('manager demo renders its accessible, synthetic-data shell', async () => {
+  test('public semantic-search portfolio renders its accessible synthetic shell', async () => {
     const response = await request('/');
     const html = await response.text();
 
@@ -63,11 +63,10 @@ if (mode === 'development') {
     assertSecurityHeaders(response);
     assert.match(html, /<html[^>]*lang="en"/i);
     assertSingleMain(html);
-    assert.match(html, /Local demo:/);
-    assert.match(html, /Do not use them for hiring decisions/);
-    assert.match(html, /Search candidates/);
-    assert.match(html, /Browse files/);
-    assert.match(html, /Send invite by text/);
+    assert.match(html, /Synthetic data · read-only/);
+    assert.match(html, /What kind of candidate are you looking for\?/);
+    assert.match(html, /Search profiles/);
+    assert.match(html, /automated decisions/i);
     assertNamedServerRenderedControls(html);
   });
 
@@ -83,12 +82,18 @@ if (mode === 'development') {
     assertNamedServerRenderedControls(html);
   });
 } else if (mode === 'production') {
-  test('legacy demo pages remain unavailable in production', async () => {
-    for (const path of ['/', '/apply']) {
-      const response = await request(path);
-      assert.equal(response.status, 404, path);
-      assertSecurityHeaders(response);
-    }
+  test('public synthetic portfolio is available while the legacy candidate page remains closed', async () => {
+    const publicResponse = await request('/');
+    const html = await publicResponse.text();
+    assert.equal(publicResponse.status, 200);
+    assertSecurityHeaders(publicResponse);
+    assertSingleMain(html);
+    assert.match(html, /Synthetic data · read-only/);
+    assert.match(html, /What kind of candidate are you looking for\?/);
+
+    const candidateResponse = await request('/apply');
+    assert.equal(candidateResponse.status, 404);
+    assertSecurityHeaders(candidateResponse);
   });
 
   test('legacy demo mutations stop at the production route gate', async () => {

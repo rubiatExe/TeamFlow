@@ -131,3 +131,28 @@ test('the global demo switch names its destination and keeps a mobile-size targe
   assert.match(demoToggle, /min-h-11/u);
   assert.match(demoToggle, /Switch to \{destinationView\}/u);
 });
+
+test('public semantic search exposes visible guidance, ordered results, and literal citations', () => {
+  const page = source('app/page.tsx');
+  const search = source('components/demo/recruiter-semantic-search.tsx');
+
+  assert.match(page, /Synthetic data · read-only/u);
+  assert.match(page, /A hiring manager reviews evidence/u);
+  assert.match(page, /AI retrieves\. The manager decides\./u);
+  assert.doesNotMatch(page, /ManagerDashboard/u);
+
+  assert.match(search, /<form role="search"/u);
+  assert.match(search, /htmlFor="semantic-candidate-query"/u);
+  assert.match(search, /aria-describedby="semantic-query-guidance"/u);
+  assert.match(search, /maxLength=\{280\}/u);
+  assert.match(search, /aria-live="polite"/u);
+  assert.match(search, /role="alert"/u);
+  assert.match(search, /<ol[\s\S]{0,160}aria-label="Semantically ranked synthetic candidate profiles"/u);
+  assert.match(search, /<blockquote/u);
+  assert.match(search, /<figcaption/u);
+  assert.match(search, /citation\.citation_id/u);
+  assert.match(search, /weighted evidence similarity/iu);
+  assert.match(search, /not a fit score/u);
+  assert.match(search, /min-h-12/u);
+  assert.match(search, /sm:flex-row/u);
+});

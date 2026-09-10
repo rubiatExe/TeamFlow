@@ -4,6 +4,13 @@
 
 TeamFlow transforms the hourly hiring process with AI-powered resume parsing, intelligent candidate scoring, and a frictionless application experience. Built for busy hiring managers who need to make fast, informed decisions.
 
+**Live portfolio demo:** [team-floww.vercel.app](https://team-floww.vercel.app/) — a
+read-only semantic candidate search over eight fictional profiles. Every result includes
+literal citations to its synthetic résumé blocks, the active retrieval mode is visible,
+and no hiring decision is automated. See the
+[`public semantic-search demo guide`](docs/public-semantic-search-demo.md) for the exact
+runtime and evidence boundary.
+
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
 [![Gemini](https://img.shields.io/badge/Gemini-AI-blue?logo=google)](https://ai.google.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?logo=typescript)](https://www.typescriptlang.org/)
@@ -25,6 +32,7 @@ TeamFlow uses AI to solve this:
 
 | Feature | How It Helps |
 |---------|-------------|
+| 🔎 **Evidence-Grounded Search Demo** | A manager describes job-related needs in natural language and receives ranked fictional profiles with literal source citations |
 | 🧠 **Smart Resume Parsing** | Drop a PDF and get validated structured data plus a fit score |
 | 📊 **AI Fit Scoring** | Gemini analyzes each candidate against role-specific requirements |
 | 📱 **Magic Link Invite Demo** | Prototype invite and candidate flow; production token verification and route authorization remain open |
@@ -112,6 +120,7 @@ Experience level, relevant skills, certifications, and languages — all collect
 | Area | Where to Start |
 |---|---|
 | Manager dashboard | `app/page.tsx` and `components/candidates/` |
+| Public semantic-search demo | `components/demo/`, `app/api/demo/search/`, and `lib/demo/` |
 | Candidate application | `app/apply/page.tsx` and `components/candidate-application/` |
 | API orchestration | `app/api/` |
 | AI scoring | `lib/ai/` |

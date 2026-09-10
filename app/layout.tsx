@@ -16,8 +16,16 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TeamFlow — Smart Hiring for Hourly Roles",
-  description: "AI-native hiring agent for cafés, restaurants, and retail. Upload resumes, score candidates, and hire faster.",
+  metadataBase: new URL("https://team-floww.vercel.app"),
+  title: "TeamFlow — Evidence-Grounded Candidate Search",
+  description: "A production-deployed, synthetic-only demonstration of semantic candidate retrieval with visible source citations and human review.",
+  alternates: { canonical: "/" },
+  openGraph: {
+    title: "TeamFlow — Evidence-Grounded Candidate Search",
+    description: "Describe job-relevant experience and inspect the synthetic résumé evidence behind every semantic match.",
+    type: "website",
+    url: "/",
+  },
 };
 
 export default function RootLayout({
@@ -28,7 +36,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
       >
         <ToastProvider>
           {children}
