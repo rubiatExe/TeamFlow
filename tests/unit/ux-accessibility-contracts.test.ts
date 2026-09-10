@@ -136,9 +136,13 @@ test('public semantic search exposes visible guidance, ordered results, and lite
   const page = source('app/page.tsx');
   const search = source('components/demo/recruiter-semantic-search.tsx');
 
+  assert.match(page, /Cocoa Bakery/u);
+  assert.match(page, /Hiring workspace/u);
+  assert.match(page, /Three easy steps/u);
   assert.match(page, /Synthetic data · read-only/u);
   assert.match(page, /A hiring manager reviews evidence/u);
-  assert.match(page, /AI retrieves\. The manager decides\./u);
+  assert.match(page, /The search retrieves; the manager decides\./u);
+  assert.doesNotMatch(page, /Inspect the implementation behind the claims/u);
   assert.doesNotMatch(page, /ManagerDashboard/u);
 
   assert.match(search, /<form role="search"/u);
@@ -147,6 +151,9 @@ test('public semantic search exposes visible guidance, ordered results, and lite
   assert.match(search, /maxLength=\{280\}/u);
   assert.match(search, /aria-live="polite"/u);
   assert.match(search, /role="alert"/u);
+  assert.match(search, /Find candidates/u);
+  assert.match(search, /Why this result appeared/u);
+  assert.match(search, /Technical search numbers/u);
   assert.match(search, /<ol[\s\S]{0,160}aria-label="Semantically ranked synthetic candidate profiles"/u);
   assert.match(search, /<blockquote/u);
   assert.match(search, /<figcaption/u);

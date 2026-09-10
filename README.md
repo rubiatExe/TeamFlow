@@ -4,10 +4,11 @@
 
 TeamFlow transforms the hourly hiring process with AI-powered resume parsing, intelligent candidate scoring, and a frictionless application experience. Built for busy hiring managers who need to make fast, informed decisions.
 
-**Live portfolio demo:** [team-floww.vercel.app](https://team-floww.vercel.app/) — a
-read-only semantic candidate search over eight fictional profiles. Every result includes
-literal citations to its synthetic résumé blocks, the active retrieval mode is visible,
-and no hiring decision is automated. See the
+**Live bakery-owner demo:** [team-floww.vercel.app](https://team-floww.vercel.app/) — a
+read-only hiring workspace for the fictional Cocoa Bakery. An owner can describe an open
+shift in everyday language and review an ordered list drawn from eight fictional profiles.
+Every result includes literal citations to its synthetic résumé blocks, the active
+retrieval mode is visible, and no hiring decision is automated. See the
 [`public semantic-search demo guide`](docs/public-semantic-search-demo.md) for the exact
 runtime and evidence boundary.
 

@@ -17,14 +17,28 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://team-floww.vercel.app"),
-  title: "TeamFlow — Evidence-Grounded Candidate Search",
-  description: "A production-deployed, synthetic-only demonstration of semantic candidate retrieval with visible source citations and human review.",
+  title: "TeamFlow — Simple Hiring for Small Teams",
+  description: "A bakery-owner hiring workspace that turns a plain-language need into a reviewable candidate list with visible résumé evidence.",
   alternates: { canonical: "/" },
   openGraph: {
-    title: "TeamFlow — Evidence-Grounded Candidate Search",
-    description: "Describe job-relevant experience and inspect the synthetic résumé evidence behind every semantic match.",
+    title: "TeamFlow — Simple Hiring for Small Teams",
+    description: "Describe the shift you need to fill and review the fictional résumé evidence behind every result.",
     type: "website",
     url: "/",
+    images: [
+      {
+        url: "/og.png",
+        width: 1200,
+        height: 630,
+        alt: "TeamFlow — Simple hiring help for small teams — Cocoa Bakery demo workspace",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "TeamFlow — Simple Hiring for Small Teams",
+    description: "Describe the shift you need to fill and review the fictional résumé evidence behind every result.",
+    images: ["/og.png"],
   },
 };
 

@@ -1,20 +1,22 @@
 # Public semantic-search demo
 
-The production portfolio entry point is
-[https://team-floww.vercel.app/](https://team-floww.vercel.app/). It gives a hiring
-manager a natural-language search box and returns a new ordered list of fictional
-profiles with two literal résumé-block citations per result.
+The production entry point is a fictional small-business hiring workspace at
+[https://team-floww.vercel.app/](https://team-floww.vercel.app/). It lets the owner of
+Cocoa Bakery describe an open shift in everyday language and returns an ordered list of
+fictional profiles with two literal résumé-block citations per result.
 
 ## Recommended three-minute walkthrough
 
-1. Open the production URL and point out **Synthetic data · read-only**.
+1. Open the production URL and point out **Cocoa Bakery**, the three open sample roles,
+   and the always-visible **Demo · fictional applicants** label.
 2. Search for `Barista who can train new team members and open on weekends`.
-3. Explain that each citation shows its raw block cosine similarity. The larger result
-   number is a deterministic evidence aggregate: 75% of the highest block cosine plus
-   25% of the second-highest. Neither number is a fit score or hiring recommendation.
-4. Open the evidence under the first result. Each quotation is copied from the
-   canonical synthetic source block identified beside it; the API checks literal
-   membership before returning the response.
+3. Review the exact résumé quotations beside the first result. Each quotation is copied
+   from the canonical synthetic source block identified beside it; the API checks
+   literal membership before returning the response.
+4. If technical detail is useful, open **Technical search numbers**. Each citation has a
+   raw block cosine similarity. The candidate-level number is a deterministic evidence
+   aggregate: 75% of the highest block cosine plus 25% of the second-highest. Neither
+   number is a fit score or hiring recommendation.
 5. Point to the runtime badge:
    - **Live Gemini embeddings** means this request used `gemini-embedding-001`, 768
      dimensions, `RETRIEVAL_QUERY` for the query, and `RETRIEVAL_DOCUMENT` for the
@@ -25,8 +27,8 @@ profiles with two literal résumé-block citations per result.
 6. Try `young barista with latte art` to show that this directly named sensitive-trait
    query is blocked without returning profiles. This lexical safeguard is not a complete
    classifier for every sensitive attribute, proxy, language, or obfuscation.
-7. Use the architecture links on the page to distinguish this public retrieval demo
-   from the protected hiring-agent implementation.
+7. Open **About the demo, safety, and technical proof** only if the reviewer wants to
+   distinguish this public retrieval demo from the protected hiring-agent implementation.
 
 ## Request flow
 

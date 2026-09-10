@@ -55,7 +55,7 @@ function assertNamedServerRenderedControls(html) {
 }
 
 if (mode === 'development') {
-  test('public semantic-search portfolio renders its accessible synthetic shell', async () => {
+  test('public bakery-owner search workspace renders its accessible synthetic shell', async () => {
     const response = await request('/');
     const html = await response.text();
 
@@ -63,10 +63,11 @@ if (mode === 'development') {
     assertSecurityHeaders(response);
     assert.match(html, /<html[^>]*lang="en"/i);
     assertSingleMain(html);
+    assert.match(html, /Cocoa Bakery/);
     assert.match(html, /Synthetic data · read-only/);
-    assert.match(html, /What kind of candidate are you looking for\?/);
-    assert.match(html, /Search profiles/);
-    assert.match(html, /automated decisions/i);
+    assert.match(html, /What do you need help covering\?/);
+    assert.match(html, /Find candidates/);
+    assert.match(html, /automated hiring decisions/i);
     assertNamedServerRenderedControls(html);
   });
 
@@ -82,14 +83,15 @@ if (mode === 'development') {
     assertNamedServerRenderedControls(html);
   });
 } else if (mode === 'production') {
-  test('public synthetic portfolio is available while the legacy candidate page remains closed', async () => {
+  test('public bakery-owner workspace is available while the legacy candidate page remains closed', async () => {
     const publicResponse = await request('/');
     const html = await publicResponse.text();
     assert.equal(publicResponse.status, 200);
     assertSecurityHeaders(publicResponse);
     assertSingleMain(html);
+    assert.match(html, /Cocoa Bakery/);
     assert.match(html, /Synthetic data · read-only/);
-    assert.match(html, /What kind of candidate are you looking for\?/);
+    assert.match(html, /What do you need help covering\?/);
 
     const candidateResponse = await request('/apply');
     assert.equal(candidateResponse.status, 404);

@@ -10,11 +10,13 @@ import {
 import {
   ArrowRight,
   CheckCircle2,
+  ChevronDown,
   Clock3,
   FileText,
   LoaderCircle,
   MapPin,
   Quote,
+  RotateCcw,
   Search,
   ShieldCheck,
   Sparkles,
@@ -52,94 +54,103 @@ const INITIAL_STATE: SearchViewState = {
 
 function ResultCard({ result }: { result: DemoSearchResult }) {
   return (
-    <li className="h-full">
-      <article className="flex h-full flex-col overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white shadow-[0_16px_50px_rgba(28,25,23,0.07)]">
-        <div className="border-b border-stone-100 p-5 sm:p-6">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex min-w-0 items-start gap-3">
-              <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[#173f32] text-sm font-semibold text-white">
-                <span className="sr-only">Rank </span>
-                {result.rank}
+    <li>
+      <article className="overflow-hidden rounded-2xl border border-[#ded4c8] bg-white shadow-[0_8px_28px_rgba(76,46,32,0.06)]">
+        <div className="grid md:grid-cols-[0.78fr_1.22fr]">
+          <div className="p-5 sm:p-6">
+            <p className="text-xs font-bold uppercase tracking-[0.13em] text-[#9a422b]">
+              Search result {result.rank}
+            </p>
+            <h3 className="mt-2 text-xl font-bold text-[#3d241c] sm:text-2xl">
+              {result.display_name}
+            </h3>
+            <p className="mt-1 text-sm font-semibold leading-6 text-stone-600">
+              {result.headline}
+            </p>
+
+            <div className="mt-4 grid gap-2 text-sm text-stone-600">
+              <span className="inline-flex items-center gap-2">
+                <MapPin className="size-4 shrink-0 text-stone-400" aria-hidden="true" />
+                {result.location}
               </span>
-              <div className="min-w-0">
-                <h3 className="text-lg font-semibold text-stone-900 sm:text-xl">
-                  {result.display_name}
-                </h3>
-                <p className="mt-1 text-sm font-medium text-stone-600">{result.headline}</p>
+              <span className="inline-flex items-center gap-2">
+                <Clock3 className="size-4 shrink-0 text-stone-400" aria-hidden="true" />
+                {result.years_experience} {result.years_experience === 1 ? 'year' : 'years'} of documented experience
+              </span>
+            </div>
+
+            <p className="mt-5 text-xs font-bold uppercase tracking-[0.12em] text-stone-500">Profile skills</p>
+            <div className="mt-2 flex flex-wrap gap-2" aria-label="Profile skills">
+              {result.skills.map(skill => (
+                <Badge
+                  key={skill}
+                  variant="secondary"
+                  className="border border-[#e4d8cb] bg-[#faf6ef] px-2.5 py-1 text-xs font-medium text-stone-700"
+                >
+                  {skill}
+                </Badge>
+              ))}
+            </div>
+          </div>
+
+          <div className="border-t border-[#e7ded3] bg-[#fdfaf5] p-5 sm:p-6 md:border-l md:border-t-0">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#eaf2e6] text-[#466447]">
+                <Quote className="size-4" aria-hidden="true" />
+              </span>
+              <div>
+                <p className="font-bold text-[#3d241c]">Why this result appeared</p>
+                <p className="mt-0.5 text-xs text-stone-500">Exact lines from this fictional résumé</p>
               </div>
             </div>
-            <div className="shrink-0 text-right">
-              <p className="font-mono text-lg font-semibold tabular-nums text-[#173f32]">
-                {result.weighted_evidence_similarity.toFixed(3)}
-              </p>
-              <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-stone-500">
-                weighted evidence similarity
-              </p>
+
+            <div className="mt-4 space-y-3">
+              {result.citations.map(citation => (
+                <figure
+                  key={citation.citation_id}
+                  id={citation.citation_id}
+                  className="rounded-xl border border-[#e5dbcf] bg-white p-4"
+                >
+                  <blockquote className="text-sm leading-6 text-stone-700">
+                    “{citation.exact_quote}”
+                  </blockquote>
+                  <figcaption className="mt-3 flex items-center gap-1.5 border-t border-stone-100 pt-3 text-xs leading-5 text-stone-500">
+                    <FileText className="size-3.5 shrink-0" aria-hidden="true" />
+                    {citation.document_label} · {citation.location} · [{citation.citation_id}]
+                  </figcaption>
+                </figure>
+              ))}
             </div>
-          </div>
 
-          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 text-sm text-stone-600">
-            <span className="inline-flex items-center gap-1.5">
-              <MapPin className="size-4" aria-hidden="true" />
-              {result.location}
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <Clock3 className="size-4" aria-hidden="true" />
-              {result.years_experience} {result.years_experience === 1 ? 'year' : 'years'} documented experience
-            </span>
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2" aria-label="Profile skills">
-            {result.skills.map(skill => (
-              <Badge
-                key={skill}
-                variant="secondary"
-                className="border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-700"
-              >
-                {skill}
-              </Badge>
-            ))}
+            <div className="mt-4 flex flex-wrap gap-2" aria-label="Topics found in retrieved evidence">
+              <span className="py-1 text-xs font-semibold text-stone-500">Evidence mentions:</span>
+              {result.evidence_topics.map(topic => (
+                <span key={topic} className="rounded-full bg-[#eaf2e6] px-2.5 py-1 text-xs font-medium text-[#39583a]">
+                  {topic}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
 
-        <div className="flex-1 bg-[#fbfaf7] p-5 sm:p-6">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold text-stone-900">
-              <Quote className="size-4 text-emerald-700" aria-hidden="true" />
-              Retrieved evidence
-            </div>
-            <span className="text-xs text-stone-500">Literal source blocks</span>
+        <details className="group border-t border-[#e7ded3] bg-white px-5 py-3 sm:px-6">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-xs font-semibold text-stone-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9f3f27]">
+            Technical search numbers
+            <ChevronDown className="size-4 transition group-open:rotate-180" aria-hidden="true" />
+          </summary>
+          <div className="pb-3 text-xs leading-5 text-stone-500">
+            <p>
+              Weighted evidence similarity: {result.weighted_evidence_similarity.toFixed(3)}. This compares the search with the two quoted résumé passages. It is not a fit score, confidence estimate, or hiring recommendation.
+            </p>
+            <ul className="mt-2 space-y-1" aria-label="Citation similarity values">
+              {result.citations.map(citation => (
+                <li key={citation.citation_id} className="font-mono">
+                  [{citation.citation_id}] block similarity {citation.similarity.toFixed(3)}
+                </li>
+              ))}
+            </ul>
           </div>
-
-          <div className="space-y-3">
-            {result.citations.map(citation => (
-              <figure
-                key={citation.citation_id}
-                id={citation.citation_id}
-                className="rounded-xl border border-stone-200 bg-white p-4"
-              >
-                <blockquote className="text-sm leading-6 text-stone-700">
-                  “{citation.exact_quote}”
-                </blockquote>
-                <figcaption className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-stone-100 pt-3 text-xs text-stone-500">
-                  <span className="inline-flex items-center gap-1.5 font-medium text-stone-700">
-                    <FileText className="size-3.5" aria-hidden="true" />
-                    [{citation.citation_id}] {citation.document_label} · {citation.location}
-                  </span>
-                  <span className="font-mono tabular-nums">block similarity {citation.similarity.toFixed(3)}</span>
-                </figcaption>
-              </figure>
-            ))}
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2" aria-label="Topics found in retrieved evidence">
-            {result.evidence_topics.map(topic => (
-              <span key={topic} className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
-                {topic}
-              </span>
-            ))}
-          </div>
-        </div>
+        </details>
       </article>
     </li>
   );
@@ -222,155 +233,169 @@ export function RecruiterSemanticSearch() {
   const isLiveEmbedding = state.response?.retrieval.mode === 'live_embedding';
 
   return (
-    <section id="search-demo" aria-labelledby="search-demo-title" className="scroll-mt-24">
-      <div className="rounded-[1.75rem] border border-white/10 bg-[#10271f] p-5 shadow-[0_30px_90px_rgba(12,27,22,0.25)] sm:p-7 lg:p-9">
-        <div className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-end">
-          <div>
-            <Badge className="border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-emerald-100">
-              <Sparkles className="size-3.5" aria-hidden="true" />
-              Interactive recruiter demo
-            </Badge>
-            <h2 id="search-demo-title" className="mt-5 max-w-xl text-3xl font-semibold tracking-[-0.04em] !text-white sm:text-4xl">
-              Search résumé evidence in natural language.
-            </h2>
-            <p className="mt-4 max-w-lg text-base leading-7 text-emerald-50/70">
-              Describe the job-relevant experience you need. TeamFlow embeds the query, ranks an isolated synthetic corpus, and returns the exact résumé blocks behind each result.
-            </p>
+    <section id="search-demo" aria-labelledby="search-demo-title" className="min-w-0 scroll-mt-6">
+      <div className="rounded-2xl border border-[#ded4c8] bg-white p-5 shadow-[0_12px_38px_rgba(76,46,32,0.07)] sm:p-7">
+        <Badge variant="outline" className="border-[#e0d3c4] bg-[#fff9f0] px-3 py-1 text-[#8d3925]">
+          <Sparkles className="size-3.5" aria-hidden="true" />
+          Candidate search
+        </Badge>
+        <h2 id="search-demo-title" className="mt-4 text-2xl font-bold tracking-[-0.025em] text-[#3d241c] sm:text-3xl">
+          What do you need help covering?
+        </h2>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-stone-600 sm:text-base">
+          Write it the way you’d explain it to a manager—include the job, shift, and experience that matter.
+        </p>
+
+        <form role="search" onSubmit={handleSubmit} className="mt-6">
+          <label htmlFor="semantic-candidate-query" className="text-sm font-bold text-stone-800">
+            Describe the person you need
+          </label>
+          <p id="semantic-query-guidance" className="mt-1 text-xs leading-5 text-stone-500">
+            Search by job-related skills, experience, certifications, or schedule. Don’t enter real applicant data. If live mode is enabled, query text is sent to Google for embedding.
+          </p>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-stone-400" aria-hidden="true" />
+              <input
+                id="semantic-candidate-query"
+                value={query}
+                onChange={event => setQuery(event.target.value)}
+                aria-describedby="semantic-query-guidance"
+                autoComplete="off"
+                maxLength={280}
+                placeholder="Example: Weekend opener who can train baristas"
+                className="min-h-12 w-full rounded-xl border border-[#d7cabd] bg-[#fffdf9] py-3 pl-11 pr-4 text-sm text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-[#9f3f27] focus:bg-white focus:ring-4 focus:ring-[#f4ddd5]"
+              />
+            </div>
+
+            <Button
+              type="submit"
+              disabled={state.loading || query.trim().length < 3}
+              className="min-h-12 rounded-xl bg-[#8d3925] px-5 font-bold text-white shadow-sm hover:bg-[#712c1d] focus-visible:ring-[#9f3f27]"
+            >
+              {state.loading ? (
+                <>
+                  <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                  Searching résumés…
+                </>
+              ) : (
+                <>
+                  Find candidates
+                  <ArrowRight className="size-4" aria-hidden="true" />
+                </>
+              )}
+            </Button>
           </div>
 
-          <form role="search" onSubmit={handleSubmit} className="rounded-2xl bg-white p-4 shadow-2xl sm:p-5">
-            <label htmlFor="semantic-candidate-query" className="text-sm font-semibold text-stone-900">
-              What kind of candidate are you looking for?
-            </label>
-            <p id="semantic-query-guidance" className="mt-1 text-xs leading-5 text-stone-500">
-              Use job criteria only—never applicant data. If live mode is enabled, query text is sent to Google for embedding.
-            </p>
-            <div className="mt-3 flex flex-col gap-3 sm:flex-row">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-stone-400" aria-hidden="true" />
-                <input
-                  id="semantic-candidate-query"
-                  value={query}
-                  onChange={event => setQuery(event.target.value)}
-                  aria-describedby="semantic-query-guidance"
-                  autoComplete="off"
-                  maxLength={280}
-                  className="min-h-12 w-full rounded-xl border border-stone-300 bg-stone-50 py-3 pl-11 pr-4 text-sm text-stone-900 outline-none transition focus:border-emerald-700 focus:bg-white focus:ring-4 focus:ring-emerald-100"
-                />
-              </div>
-              <Button
-                type="submit"
-                disabled={state.loading || query.trim().length < 3}
-                className="min-h-12 rounded-xl bg-[#196447] px-5 font-semibold text-white hover:bg-[#104d36]"
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-stone-500">Quick examples:</span>
+            {EXAMPLE_QUERIES.map((example, index) => (
+              <button
+                key={example}
+                type="button"
+                onClick={() => chooseExample(example)}
+                disabled={state.loading}
+                aria-label={`Use example query: ${example}`}
+                className="min-h-11 rounded-full border border-[#ded4c8] bg-[#fffdf9] px-3 text-left text-xs font-semibold text-stone-700 transition hover:border-[#b9715c] hover:bg-[#fff4e8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9f3f27] disabled:opacity-50"
               >
-                {state.loading ? (
-                  <>
-                    <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-                    Searching
-                  </>
-                ) : (
-                  <>
-                    Search profiles
-                    <ArrowRight className="size-4" aria-hidden="true" />
-                  </>
-                )}
-              </Button>
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <span className="text-xs font-medium text-stone-500">Try an example:</span>
-              {EXAMPLE_QUERIES.map((example, index) => (
-                <button
-                  key={example}
-                  type="button"
-                  onClick={() => chooseExample(example)}
-                  disabled={state.loading}
-                  aria-label={`Use example query: ${example}`}
-                  className="min-h-11 rounded-full border border-stone-200 bg-white px-3 text-left text-xs font-medium text-stone-700 transition hover:border-emerald-300 hover:bg-emerald-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 disabled:opacity-50"
-                >
-                  {index === 0 ? 'Trainer + weekends' : index === 1 ? 'Early baker' : 'Shift leader'}
-                </button>
-              ))}
-            </div>
-          </form>
-        </div>
+                {index === 0 ? 'Weekend opener + training' : index === 1 ? 'Early baker + sourdough' : 'Shift lead + inventory'}
+              </button>
+            ))}
+          </div>
+        </form>
       </div>
 
-      <div className="mt-6 min-h-8" aria-live="polite" aria-atomic="true">
+      <div className="min-h-7" aria-live="polite" aria-atomic="true">
         {state.loading && (
-          <p role="status" className="inline-flex items-center gap-2 text-sm font-medium text-stone-600">
-            <LoaderCircle className="size-4 animate-spin text-emerald-700" aria-hidden="true" />
-            Embedding the query and retrieving source evidence…
+          <p role="status" className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-stone-600">
+            <LoaderCircle className="size-4 animate-spin text-[#8d3925]" aria-hidden="true" />
+            Looking through 24 fictional résumé sections…
           </p>
         )}
         {state.error && (
-          <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-            <p className="font-semibold">Search not completed</p>
+          <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            <p className="font-bold">We couldn’t run that search</p>
             <p className="mt-1">{state.error}</p>
-            {state.requestId && <p className="mt-2 font-mono text-xs">Request {state.requestId}</p>}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => { void executeSearch(query, true); }}
+              className="mt-3 min-h-11 border-red-200 bg-white text-red-800 hover:bg-red-100"
+            >
+              <RotateCcw className="size-4" aria-hidden="true" />
+              Try again
+            </Button>
+            {state.requestId && (
+              <details className="mt-3 text-xs">
+                <summary className="cursor-pointer font-semibold">Technical details</summary>
+                <p className="mt-1 font-mono">Request {state.requestId}</p>
+              </details>
+            )}
           </div>
         )}
       </div>
 
       {!state.response && !state.loading && !state.error && (
-        <div className="mt-3 grid gap-3 rounded-2xl border border-dashed border-stone-300 bg-white/60 p-5 text-sm text-stone-600 sm:grid-cols-3" role="note">
-          <p><strong className="block text-stone-900">8 fictional profiles</strong> Isolated from every private candidate record.</p>
-          <p><strong className="block text-stone-900">24 evidence blocks</strong> Available as literal, visible citations.</p>
-          <p><strong className="block text-stone-900">One click to verify</strong> Run the prepared query or choose another example.</p>
+        <div className="mt-2 rounded-2xl border border-dashed border-[#d7cabd] bg-[#fffaf3] p-5" role="note">
+          <p className="font-bold text-[#3d241c]">Ready when you are</p>
+          <p className="mt-1 text-sm leading-6 text-stone-600">
+            Try the prepared weekend-barista search or choose a quick example. A role plus one or two must-haves works well.
+          </p>
         </div>
       )}
 
       {state.response && (
-        <div className="mt-3">
-          <div className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-            <div>
-              <h2
-                ref={resultsHeadingRef}
-                tabIndex={-1}
-                className="text-xl font-semibold text-stone-900 outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 sm:text-2xl"
-              >
-                {state.response.result_count} profiles ranked by semantic relevance
-              </h2>
-              <p className="mt-1 text-sm text-stone-500">
-                Query: “{state.response.query}”
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs">
+        <div className="mt-2" aria-busy={state.loading}>
+          <div className="rounded-2xl border border-[#ded4c8] bg-white p-5 sm:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2
+                  ref={resultsHeadingRef}
+                  tabIndex={-1}
+                  className="text-xl font-bold text-[#3d241c] outline-none focus-visible:ring-2 focus-visible:ring-[#9f3f27] sm:text-2xl"
+                >
+                  {state.response.result_count} résumé matches to review
+                </h2>
+                <p className="mt-1 text-sm text-stone-500">
+                  For “{state.response.query}”
+                </p>
+              </div>
               <Badge className={isLiveEmbedding
-                ? 'border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-emerald-800'
-                : 'border border-amber-200 bg-amber-50 px-3 py-1.5 text-amber-900'}
+                ? 'border border-[#cadfc7] bg-[#edf6e9] px-3 py-1.5 text-[#365a38]'
+                : 'border border-[#e7d1a8] bg-[#fff7df] px-3 py-1.5 text-[#76531e]'}
               >
                 {isLiveEmbedding ? <CheckCircle2 className="size-3.5" aria-hidden="true" /> : <ShieldCheck className="size-3.5" aria-hidden="true" />}
-                {isLiveEmbedding ? 'Live Gemini embeddings' : 'Deterministic fallback'}
+                {isLiveEmbedding ? 'Live Gemini embeddings' : 'Demo matching · Deterministic fallback'}
               </Badge>
-              <span
-                aria-label={`${state.response.retrieval.dimensions} dimensions; ${state.response.latency_ms} milliseconds response latency`}
-                className="rounded-full bg-stone-100 px-3 py-1.5 font-mono text-stone-600"
-              >
-                {state.response.retrieval.dimensions}d · {state.response.latency_ms}ms
-              </span>
-              <span
-                aria-label={`Request ID ${state.response.request_id}`}
-                className="rounded-full bg-stone-100 px-3 py-1.5 font-mono text-stone-600"
-              >
-                {state.response.request_id.slice(0, 8)}
-              </span>
             </div>
+
+            <div className="mt-4 rounded-xl border border-[#ead9b7] bg-[#fff8e8] px-4 py-3 text-sm leading-6 text-[#674b20]" role="note">
+              Ordered by how closely the quoted résumé passages relate to your search—not by applicant quality. There is no pass line or hiring recommendation.
+            </div>
+            <p className="mt-3 flex items-start gap-2 text-sm leading-6 text-stone-600">
+              <ShieldCheck className="mt-1 size-4 shrink-0 text-[#466447]" aria-hidden="true" />
+              Your check: read the quoted lines and verify the same job-related requirements with every applicant.
+            </p>
+
+            <details className="group mt-4 border-t border-stone-100 pt-3 text-xs text-stone-500">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9f3f27]">
+                Search details and safeguards
+                <ChevronDown className="size-4 transition group-open:rotate-180" aria-hidden="true" />
+              </summary>
+              <div className="pb-2 leading-5">
+                <p>
+                  {state.response.retrieval.dimensions} dimensions · {state.response.latency_ms}ms · request {state.response.request_id}
+                </p>
+                <ul className="mt-2 list-disc space-y-1 pl-5" aria-label="Search response safeguards">
+                  {state.response.warnings.map(warning => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
+            </details>
           </div>
 
-          <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-6 text-sky-950" role="note">
-            Similarity is a retrieval signal—not a fit score, confidence estimate, or hiring recommendation. No cutoff is applied; a manager must interpret the cited evidence.
-          </div>
-
-          <ul className="mt-3 grid gap-2 text-xs leading-5 text-stone-600 sm:grid-cols-3" aria-label="Search response safeguards">
-            {state.response.warnings.map(warning => (
-              <li key={warning} className="rounded-lg border border-stone-200 bg-white px-3 py-2">
-                {warning}
-              </li>
-            ))}
-          </ul>
-
-          <ol className="mt-5 grid gap-5 lg:grid-cols-2" aria-label="Semantically ranked synthetic candidate profiles">
+          <ol className="mt-5 grid gap-4" aria-label="Semantically ranked synthetic candidate profiles">
             {state.response.results.map(result => (
               <ResultCard key={result.synthetic_candidate_ref} result={result} />
             ))}
