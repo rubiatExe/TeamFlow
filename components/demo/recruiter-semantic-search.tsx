@@ -10,9 +10,9 @@ import {
 import {
   ArrowRight,
   CheckCircle2,
-  ChevronDown,
   Clock3,
   FileText,
+  ListChecks,
   LoaderCircle,
   MapPin,
   Quote,
@@ -53,6 +53,16 @@ const INITIAL_STATE: SearchViewState = {
 };
 
 function ResultCard({ result }: { result: DemoSearchResult }) {
+  const citationCount = new Set(
+    result.citations.map(citation => citation.source_block_id),
+  ).size;
+  const evidenceTopics = [...new Map(
+    result.evidence_topics
+      .map(topic => topic.normalize('NFKC').trim().replace(/\s+/gu, ' '))
+      .filter(Boolean)
+      .map(topic => [topic.toLocaleLowerCase('en-US'), topic]),
+  ).values()];
+
   return (
     <li>
       <article className="overflow-hidden rounded-2xl border border-[#ded4c8] bg-white shadow-[0_8px_28px_rgba(76,46,32,0.06)]">
@@ -122,35 +132,44 @@ function ResultCard({ result }: { result: DemoSearchResult }) {
               ))}
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-2" aria-label="Topics found in retrieved evidence">
-              <span className="py-1 text-xs font-semibold text-stone-500">Evidence mentions:</span>
-              {result.evidence_topics.map(topic => (
-                <span key={topic} className="rounded-full bg-[#eaf2e6] px-2.5 py-1 text-xs font-medium text-[#39583a]">
-                  {topic}
+            <div className="mt-4 rounded-xl border border-[#d9e2d4] bg-[#f2f7ef] p-4">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-white text-[#466447] shadow-sm">
+                  <ListChecks className="size-4" aria-hidden="true" />
                 </span>
-              ))}
+                <div>
+                  <p className="font-bold text-[#304b32]">Manager review guide</p>
+                  <p className="mt-0.5 text-xs leading-5 text-[#5b705c]">
+                    A quick count of what is shown in the résumé evidence above.
+                  </p>
+                </div>
+              </div>
+
+              <dl className="mt-4">
+                <div className="flex items-center gap-3 rounded-lg bg-white px-4 py-3 shadow-sm">
+                  <dt className="order-2 text-sm font-semibold leading-5 text-stone-600">
+                    Quoted résumé {citationCount === 1 ? 'example' : 'examples'} behind this result
+                  </dt>
+                  <dd className="order-1 text-3xl font-bold text-[#3d241c]">{citationCount}</dd>
+                </div>
+              </dl>
+
+              <p className="mt-4 text-xs font-bold uppercase tracking-[0.1em] text-[#4b654d]">
+                Topics mentioned in the quoted sections
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2" aria-label="Job-related topics mentioned in the quoted résumé examples">
+                {evidenceTopics.map(topic => (
+                  <span key={topic} className="rounded-full border border-[#d5e1d0] bg-white px-2.5 py-1 text-xs font-medium text-[#39583a]">
+                    {topic}
+                  </span>
+                ))}
+              </div>
+              <p className="mt-3 text-xs leading-5 text-[#5b705c]">
+                This guide organizes what to review; it does not grade the person. Compare every applicant against the same job requirements.
+              </p>
             </div>
           </div>
         </div>
-
-        <details className="group border-t border-[#e7ded3] bg-white px-5 py-3 sm:px-6">
-          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-xs font-semibold text-stone-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9f3f27]">
-            Technical search numbers
-            <ChevronDown className="size-4 transition group-open:rotate-180" aria-hidden="true" />
-          </summary>
-          <div className="pb-3 text-xs leading-5 text-stone-500">
-            <p>
-              Weighted evidence similarity: {result.weighted_evidence_similarity.toFixed(3)}. This compares the search with the two quoted résumé passages. It is not a fit score, confidence estimate, or hiring recommendation.
-            </p>
-            <ul className="mt-2 space-y-1" aria-label="Citation similarity values">
-              {result.citations.map(citation => (
-                <li key={citation.citation_id} className="font-mono">
-                  [{citation.citation_id}] block similarity {citation.similarity.toFixed(3)}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </details>
       </article>
     </li>
   );
@@ -251,7 +270,7 @@ export function RecruiterSemanticSearch() {
             Describe the person you need
           </label>
           <p id="semantic-query-guidance" className="mt-1 text-xs leading-5 text-stone-500">
-            Search by job-related skills, experience, certifications, or schedule. Don’t enter real applicant data. If live mode is enabled, query text is sent to Google for embedding.
+            Search by job-related skills, experience, certifications, or schedule. Don’t enter real applicant data. If live search is on, your search words are sent to Google to find related résumé wording.
           </p>
           <div className="mt-3 flex flex-col gap-3 sm:flex-row">
             <div className="relative flex-1">
@@ -327,7 +346,7 @@ export function RecruiterSemanticSearch() {
             </Button>
             {state.requestId && (
               <details className="mt-3 text-xs">
-                <summary className="cursor-pointer font-semibold">Technical details</summary>
+                <summary className="cursor-pointer font-semibold">Support reference</summary>
                 <p className="mt-1 font-mono">Request {state.requestId}</p>
               </details>
             )}
@@ -365,12 +384,12 @@ export function RecruiterSemanticSearch() {
                 : 'border border-[#e7d1a8] bg-[#fff7df] px-3 py-1.5 text-[#76531e]'}
               >
                 {isLiveEmbedding ? <CheckCircle2 className="size-3.5" aria-hidden="true" /> : <ShieldCheck className="size-3.5" aria-hidden="true" />}
-                {isLiveEmbedding ? 'Live Gemini embeddings' : 'Demo matching · Deterministic fallback'}
+                {isLiveEmbedding ? 'Google-powered matching' : 'Built-in demo matching'}
               </Badge>
             </div>
 
             <div className="mt-4 rounded-xl border border-[#ead9b7] bg-[#fff8e8] px-4 py-3 text-sm leading-6 text-[#674b20]" role="note">
-              Ordered by how closely the quoted résumé passages relate to your search—not by applicant quality. There is no pass line or hiring recommendation.
+              The list puts the closest résumé wording first. It does not grade applicants or recommend who to hire.
             </div>
             <p className="mt-3 flex items-start gap-2 text-sm leading-6 text-stone-600">
               <ShieldCheck className="mt-1 size-4 shrink-0 text-[#466447]" aria-hidden="true" />
@@ -379,23 +398,19 @@ export function RecruiterSemanticSearch() {
 
             <details className="group mt-4 border-t border-stone-100 pt-3 text-xs text-stone-500">
               <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9f3f27]">
-                Search details and safeguards
-                <ChevronDown className="size-4 transition group-open:rotate-180" aria-hidden="true" />
+                Before you review
+                <span className="text-base font-normal text-stone-400 transition group-open:rotate-45" aria-hidden="true">+</span>
               </summary>
-              <div className="pb-2 leading-5">
-                <p>
-                  {state.response.retrieval.dimensions} dimensions · {state.response.latency_ms}ms · request {state.response.request_id}
-                </p>
-                <ul className="mt-2 list-disc space-y-1 pl-5" aria-label="Search response safeguards">
-                  {state.response.warnings.map(warning => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
-              </div>
+              <ul className="list-disc space-y-1.5 pb-2 pl-5 leading-5" aria-label="Important notes about these search results">
+                {state.response.warnings.map(warning => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
             </details>
+
           </div>
 
-          <ol className="mt-5 grid gap-4" aria-label="Semantically ranked synthetic candidate profiles">
+          <ol className="mt-5 grid gap-4" aria-label="Search results for fictional applicants">
             {state.response.results.map(result => (
               <ResultCard key={result.synthetic_candidate_ref} result={result} />
             ))}

@@ -2,8 +2,6 @@ import {
   BriefcaseBusiness,
   CircleCheck,
   Coffee,
-  ExternalLink,
-  Github,
   MapPin,
   ShieldCheck,
   UsersRound,
@@ -12,32 +10,6 @@ import {
 
 import { RecruiterSemanticSearch } from '@/components/demo/recruiter-semantic-search';
 import { Badge } from '@/components/ui/badge';
-
-const repositoryUrl = 'https://github.com/rubiatExe/TeamFlow';
-const deployedCommit = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
-const sourceRef = deployedCommit && /^[0-9a-f]{40}$/u.test(deployedCommit)
-  ? deployedCommit
-  : 'codex/semantic-candidate-search';
-const deployedSourceUrl = `${repositoryUrl}/tree/${sourceRef}`;
-
-const implementationLinks = [
-  {
-    label: 'Search and citations',
-    href: `${repositoryUrl}/tree/${sourceRef}/lib/demo`,
-  },
-  {
-    label: 'LangGraph review workflow',
-    href: `${repositoryUrl}/blob/${sourceRef}/services/hiring-agent/teamflow_hiring_agent/resume_review/graph/builder.py`,
-  },
-  {
-    label: 'Evaluation checks',
-    href: `${repositoryUrl}/tree/${sourceRef}/services/hiring-agent/teamflow_hiring_agent/evaluation`,
-  },
-  {
-    label: 'Release workflow',
-    href: `${repositoryUrl}/blob/${sourceRef}/.github/workflows/deploy-hiring-agent.yml`,
-  },
-] as const;
 
 const ownerSteps = [
   {
@@ -79,17 +51,9 @@ export default function HomePage() {
             </span>
           </a>
 
-          <div className="flex items-center gap-3">
-            <Badge variant="outline" className="border-[#dfd3c3] bg-white px-2.5 py-1 text-stone-600 sm:px-3">
-              Demo · fictional applicants
-            </Badge>
-            <a
-              href="#about-demo"
-              className="hidden min-h-11 items-center rounded-lg px-2 text-sm font-semibold text-stone-600 hover:text-[#7c3020] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9f3f27] sm:inline-flex"
-            >
-              About this demo
-            </a>
-          </div>
+          <Badge variant="outline" className="border-[#dfd3c3] bg-white px-2.5 py-1 text-stone-600 sm:px-3">
+            Demo · fictional applicants
+          </Badge>
         </div>
       </header>
 
@@ -163,7 +127,7 @@ export default function HomePage() {
                 <CircleCheck className="size-4" aria-hidden="true" />
                 Your call, always
               </p>
-              <p className="mt-1 text-xs leading-5">The search finds relevant evidence. You review it and make the decision.</p>
+              <p className="mt-1 text-xs leading-5">A hiring manager reviews the résumé evidence and owns every decision. TeamFlow only helps find the relevant lines.</p>
             </div>
           </aside>
 
@@ -172,44 +136,12 @@ export default function HomePage() {
           </div>
         </div>
 
-        <section id="about-demo" className="scroll-mt-6 border-t border-[#dfd3c3] bg-[#fffdf8]">
-          <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-            <details className="group rounded-2xl border border-[#dfd3c3] bg-white p-5">
-              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 font-semibold text-[#3d241c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9f3f27]">
-                About the demo, safety, and technical proof
-                <span className="text-xl font-normal text-stone-400 transition group-open:rotate-45" aria-hidden="true">+</span>
-              </summary>
-              <div className="mt-5 grid gap-6 border-t border-stone-100 pt-5 text-sm leading-6 text-stone-600 md:grid-cols-2">
-                <div>
-                  <p className="font-semibold text-stone-900">What a bakery owner is trying here</p>
-                  <p className="mt-2">This public page searches 8 fictional profiles and 24 synthetic résumé blocks. Synthetic data · read-only. No real applicant records, messages, or hiring statuses are used.</p>
-                  <p className="mt-3">A hiring manager reviews evidence and owns every employment decision. The search retrieves; the manager decides.</p>
-                </div>
-                <div>
-                  <p className="font-semibold text-stone-900">What the repository demonstrates</p>
-                  <p className="mt-2">The private service includes LangGraph orchestration, FastMCP tools, merchant-scoped pgvector retrieval, evaluation checks, OpenTelemetry, and keyless deployment workflows. Those private-service paths are not executed by this public search page.</p>
-                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
-                    {implementationLinks.map(link => (
-                      <a key={link.label} href={link.href} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-1.5 font-semibold text-[#7c3020] underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9f3f27]">
-                        {link.label}
-                        <ExternalLink className="size-3.5" aria-hidden="true" />
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </details>
-          </div>
-        </section>
       </main>
 
       <footer className="border-t border-[#e5dacb] bg-[#f5f0e7]">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-6 text-sm text-stone-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+        <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-6 text-sm text-stone-500 sm:px-6 lg:px-8">
           <p>TeamFlow · Simple hiring help for small teams</p>
-          <a href={deployedSourceUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 self-start font-medium text-stone-600 hover:text-[#7c3020] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9f3f27] sm:self-auto">
-            <Github className="size-4" aria-hidden="true" />
-            Technical source
-          </a>
+          <p className="text-xs leading-5">Demo uses 8 fictional profiles · Read-only search · No real applicant records or status changes.</p>
         </div>
       </footer>
     </div>

@@ -181,7 +181,7 @@ export function cosineSimilarity(left: SearchVector, right: SearchVector): numbe
 
 export function sourceBlockEmbeddingText(sourceBlock: SyntheticSourceBlock): string {
   // Rank exactly what the UI cites. Adding profile metadata here would make the
-  // displayed block similarity depend on evidence the citation does not contain.
+  // returned block similarity depend on evidence the citation does not contain.
   return sourceBlock.text;
 }
 

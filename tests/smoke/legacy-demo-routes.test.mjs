@@ -64,7 +64,8 @@ if (mode === 'development') {
     assert.match(html, /<html[^>]*lang="en"/i);
     assertSingleMain(html);
     assert.match(html, /Cocoa Bakery/);
-    assert.match(html, /Synthetic data · read-only/);
+    assert.match(html, /Demo uses 8 fictional profiles/);
+    assert.match(html, /Read-only search/);
     assert.match(html, /What do you need help covering\?/);
     assert.match(html, /Find candidates/);
     assert.match(html, /automated hiring decisions/i);
@@ -90,7 +91,8 @@ if (mode === 'development') {
     assertSecurityHeaders(publicResponse);
     assertSingleMain(html);
     assert.match(html, /Cocoa Bakery/);
-    assert.match(html, /Synthetic data · read-only/);
+    assert.match(html, /Demo uses 8 fictional profiles/);
+    assert.match(html, /Read-only search/);
     assert.match(html, /What do you need help covering\?/);
 
     const candidateResponse = await request('/apply');

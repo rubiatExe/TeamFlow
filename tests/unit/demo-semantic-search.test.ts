@@ -140,6 +140,8 @@ test('search response labels provider fallback and never emits a hiring score or
   assert.equal(response.retrieval.candidate_aggregation, 'top_two_blocks_75_25');
   assert.equal(response.decision_status, 'no_hiring_decision');
   assert.equal(response.results[0].display_name, 'Maya T.');
+  assert.ok(response.warnings.some(warning => warning.includes('built-in matching')));
+  assert.doesNotMatch(response.warnings.join(' '), /cosine|vector|embedding|similarity/iu);
   for (const result of response.results) {
     assert.equal('fit_score' in result, false);
     assert.equal('recommendation' in result, false);

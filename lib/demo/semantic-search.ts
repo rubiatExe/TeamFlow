@@ -129,13 +129,13 @@ export async function searchSyntheticCandidates(
         generated_at: (dependencies.isoNow ?? (() => new Date().toISOString()))(),
         decision_status: 'no_hiring_decision',
         warnings: [
-          'Synthetic portfolio records only; no real applicants or contact details are searched.',
-          'Weighted evidence similarity combines the top two block-level cosine values; it is not candidate quality, fit, confidence, or a hiring recommendation.',
-          'No acceptance threshold or automated hiring decision is applied.',
+          'This demo searches only fictional résumé profiles; no real applicants or contact details are included.',
+          'The list order only compares wording in the quoted résumé sections. It does not measure applicant quality or recommend who to hire.',
+          'TeamFlow does not accept or reject anyone, and it does not apply a pass line.',
           ...(providerFallback
             ? [liveEmbeddingDisabled
-              ? 'Live Gemini embeddings are disabled for this public deployment, so this response used the labeled deterministic concept-vector fallback.'
-              : 'Gemini embeddings were unavailable, so this response used the labeled deterministic concept-vector fallback.']
+              ? 'Google-powered matching is off for this demo, so this search used TeamFlow’s built-in matching.'
+              : 'Google-powered matching was unavailable, so this search used TeamFlow’s built-in matching.']
             : []),
         ],
       });

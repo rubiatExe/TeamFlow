@@ -168,7 +168,8 @@ test('public synthetic search is available while the legacy candidate portal rem
   const candidatePage = readFileSync('app/apply/page.tsx', 'utf8');
 
   assert.match(publicPage, /RecruiterSemanticSearch/u);
-  assert.match(publicPage, /Synthetic data · read-only/u);
+  assert.match(publicPage, /Demo uses 8 fictional profiles/u);
+  assert.match(publicPage, /Read-only search/u);
   assert.doesNotMatch(publicPage, /ManagerDashboard|legacyDemoRoutesEnabled|notFound\(\)/u);
   assert.match(candidatePage, /legacyDemoRoutesEnabled\(\)/u);
   assert.match(candidatePage, /notFound\(\)/u);
