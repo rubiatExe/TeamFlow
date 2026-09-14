@@ -1,6 +1,6 @@
 services:
   otel-collector:
-    image: us-docker.pkg.dev/cloud-ops-agents-artifacts/google-cloud-opentelemetry-collector/otelcol-google:0.156.0@sha256:8a141713e33e4584b3bd24e0db39d56a8e650edb03d79b6bf3de82ff1cdd97f9
+    image: us-docker.pkg.dev/cloud-ops-agents-artifacts/google-cloud-opentelemetry-collector/otelcol-google:0.160.0@sha256:2bebb885ef33c00e1d999dc0b0dd13b089f8ddb1734b62c0a0524b2cf20c515e
     command:
       - --config=/etc/otelcol-google/config.yaml
     environment:
