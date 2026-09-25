@@ -1,22 +1,30 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Settings, Upload } from 'lucide-react';
+import { ChevronDown, Search, Settings, Upload } from 'lucide-react';
 
 import { CAFE_ROLES, getRoleOrDefault } from '@/lib/domain/roles';
+import type { HiringPersona } from '@/lib/domain/demo-workspace';
 
 interface TopbarProps {
   selectedRoleId: string;
+  personas?: Record<string, HiringPersona>;
+  publicDemo?: boolean;
   onRoleSelect: (roleId: string) => void;
   onUpload: () => void;
   onSettings: () => void;
   settingsTriggerRef?: React.RefObject<HTMLButtonElement | null>;
 }
 
-export function Topbar({ selectedRoleId, onRoleSelect, onUpload, onSettings, settingsTriggerRef }: TopbarProps) {
+export function Topbar({ selectedRoleId, personas, publicDemo = false, onRoleSelect, onUpload, onSettings, settingsTriggerRef }: TopbarProps) {
   const [roleMenuOpen, setRoleMenuOpen] = useState(false);
   const roleMenuRef = useRef<HTMLDivElement>(null);
   const role = getRoleOrDefault(selectedRoleId);
+  const wageForRole = (roleId: string) => {
+    const persona = personas?.[roleId];
+    return persona ? { min: persona.wageMin, max: persona.wageMax } : getRoleOrDefault(roleId).wageRange;
+  };
+  const wage = wageForRole(selectedRoleId);
 
   useEffect(() => {
     if (!roleMenuOpen) return;
@@ -51,7 +59,7 @@ export function Topbar({ selectedRoleId, onRoleSelect, onUpload, onSettings, set
           >
             <span aria-hidden="true">{role.emoji}</span>
             <span>{role.title}</span>
-            <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs text-[var(--cocoa-700)]">${role.wageRange.min}–${role.wageRange.max}/hr</span>
+            <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs text-[var(--cocoa-700)]">${wage.min}–${wage.max}/hr</span>
             <ChevronDown className={`size-4 transition-transform ${roleMenuOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
           </button>
           {roleMenuOpen ? (
@@ -67,7 +75,7 @@ export function Topbar({ selectedRoleId, onRoleSelect, onUpload, onSettings, set
                 >
                   <span aria-hidden="true">{option.emoji}</span>
                   <span className="flex-1 font-semibold">{option.title}</span>
-                  <span className="text-xs">${option.wageRange.min}–${option.wageRange.max}</span>
+                  <span className="text-xs">${wageForRole(option.id).min}–${wageForRole(option.id).max}</span>
                 </button>
               ))}
             </div>
@@ -80,7 +88,7 @@ export function Topbar({ selectedRoleId, onRoleSelect, onUpload, onSettings, set
             onClick={onUpload}
             className="flex min-h-10 items-center gap-2 rounded-[var(--radius-md)] bg-[var(--cocoa-700)] px-4 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-px hover:bg-[var(--cocoa-600)] hover:shadow-md"
           >
-            <Upload className="size-4" aria-hidden="true" /> Upload Resumes
+            {publicDemo ? <Search className="size-4" aria-hidden="true" /> : <Upload className="size-4" aria-hidden="true" />} {publicDemo ? 'Explore sample resumes' : 'Upload Resumes'}
           </button>
           <button
             ref={settingsTriggerRef}

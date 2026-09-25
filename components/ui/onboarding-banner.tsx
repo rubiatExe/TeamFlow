@@ -3,14 +3,16 @@
 import { useEffect, useState } from 'react';
 import { Check, Upload, UserRoundCheck, WandSparkles, X } from 'lucide-react';
 
-const STORAGE_KEY = 'teamflow-cocoa-onboarding-dismissed:v1';
+const STORAGE_KEY = 'teamflow-cocoa-onboarding-dismissed:v2';
 
 interface OnboardingBannerProps {
   sampleCount: number;
+  publicDemo?: boolean;
   onUpload: () => void;
+  onSearch: () => void;
 }
 
-export function OnboardingBanner({ sampleCount, onUpload }: OnboardingBannerProps) {
+export function OnboardingBanner({ sampleCount, publicDemo = false, onUpload, onSearch }: OnboardingBannerProps) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -50,15 +52,15 @@ export function OnboardingBanner({ sampleCount, onUpload }: OnboardingBannerProp
       <ol className="mt-4 grid gap-3 md:grid-cols-3">
         <li className="flex gap-3 rounded-[var(--radius-md)] bg-white/60 p-3 text-sm text-[var(--cocoa-700)]">
           <Upload className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          <span><strong className="text-[var(--cocoa-900)]">Step 1</strong> — <button type="button" onClick={onUpload} className="font-semibold underline decoration-[var(--cocoa-300)] underline-offset-2">Upload resumes</button> to add applicants.</span>
+              <span><strong className="text-[var(--cocoa-900)]">Step 1</strong> — <button type="button" onClick={publicDemo ? onSearch : onUpload} className="font-semibold underline decoration-[var(--cocoa-300)] underline-offset-2">{publicDemo ? 'Search sample résumés' : 'Upload resumes'}</button> {publicDemo ? 'for the selected role.' : 'to add applicants.'}</span>
         </li>
         <li className="flex gap-3 rounded-[var(--radius-md)] bg-white/60 p-3 text-sm text-[var(--cocoa-700)]">
           <WandSparkles className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          <span><strong className="text-[var(--cocoa-900)]">Step 2</strong> — Review evidence and invite your strongest matches.</span>
+          <span><strong className="text-[var(--cocoa-900)]">Step 2</strong> — Read the evidence and try a simulated invitation.</span>
         </li>
         <li className="flex gap-3 rounded-[var(--radius-md)] bg-white/60 p-3 text-sm text-[var(--cocoa-700)]">
           <UserRoundCheck className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          <span><strong className="text-[var(--cocoa-900)]">Step 3</strong> — Mark the winner as hired and plan their first day.</span>
+          <span><strong className="text-[var(--cocoa-900)]">Step 3</strong> — Practice moving a fictional profile through the pipeline.</span>
         </li>
       </ol>
       <div className="mt-4 flex justify-end">

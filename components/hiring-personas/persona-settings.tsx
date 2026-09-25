@@ -5,15 +5,9 @@ import { Check, CircleDollarSign, MapPin, Plus, Save, Sparkles, X } from 'lucide
 
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { getRoleOrDefault } from '@/lib/domain/roles';
+import type { HiringPersona } from '@/lib/domain/demo-workspace';
 
-export interface HiringPersona {
-  jobTitle: string;
-  wageMin: number;
-  wageMax: number;
-  dealbreakers: string[];
-  niceToHaves: string[];
-  storeLocation: string;
-}
+export type { HiringPersona } from '@/lib/domain/demo-workspace';
 
 interface PersonaSettingsProps {
   persona: HiringPersona;
@@ -21,11 +15,12 @@ interface PersonaSettingsProps {
   onClose: () => void;
   roleId?: string;
   returnFocusRef?: React.RefObject<HTMLElement | null>;
+  browserPersistence?: boolean;
 }
 
 type SettingsTab = 'role' | 'dealbreakers' | 'nice';
 
-export function PersonaSettings({ persona, onSave, onClose, roleId, returnFocusRef }: PersonaSettingsProps) {
+export function PersonaSettings({ persona, onSave, onClose, roleId, returnFocusRef, browserPersistence = false }: PersonaSettingsProps) {
   const role = getRoleOrDefault(roleId);
   const firstTabRef = useRef<HTMLButtonElement>(null);
   const roleNiceToHaves = role.niceToHaveSkills.map(skill => skill.label.replace(/^\S+\s*/u, ''));
@@ -51,19 +46,19 @@ export function PersonaSettings({ persona, onSave, onClose, roleId, returnFocusR
       ...previous,
       [field]: previous[field].includes(value)
         ? previous[field].filter(item => item !== value)
-        : [...previous[field], value],
+        : previous[field].length < 20 ? [...previous[field], value] : previous[field],
     }));
   };
 
   const addCustom = () => {
     const value = customValue.trim();
-    if (!value) return;
+    if (!value || value.length > 200) return;
     const field = activeTab === 'dealbreakers' ? 'dealbreakers' : 'niceToHaves';
-    setFormData(previous => previous[field].includes(value) ? previous : { ...previous, [field]: [...previous[field], value] });
+    setFormData(previous => previous[field].includes(value) || previous[field].length >= 20 ? previous : { ...previous, [field]: [...previous[field], value] });
     setCustomValue('');
   };
 
-  const wageError = formData.wageMin < 0 || formData.wageMax < formData.wageMin;
+  const wageError = !Number.isFinite(formData.wageMin) || !Number.isFinite(formData.wageMax) || formData.wageMin < 0 || formData.wageMax < formData.wageMin || formData.wageMax > 1_000;
 
   return (
     <Dialog open onOpenChange={open => !open && onClose()}>
@@ -80,7 +75,7 @@ export function PersonaSettings({ persona, onSave, onClose, roleId, returnFocusR
           <div className="flex items-start justify-between gap-4">
             <div>
               <DialogTitle className="font-display text-2xl font-semibold text-[var(--cocoa-900)]">Hiring Settings for {role.emoji} {role.title}</DialogTitle>
-              <DialogDescription className="mt-1 text-sm text-[var(--cocoa-600)]">These demo settings describe the review criteria shown for this role.</DialogDescription>
+              <DialogDescription className="mt-1 text-sm leading-6 text-[var(--cocoa-600)]">{browserPersistence ? 'Demo settings are saved in this browser only.' : 'Demo settings apply to this page visit only.'} They update the displayed pay and review criteria, but do not change applicant scores, search rankings, or automated decisions.</DialogDescription>
             </div>
             <DialogClose asChild>
               <button type="button" aria-label="Close hiring settings" className="flex size-10 shrink-0 items-center justify-center rounded-full text-[var(--cocoa-600)] hover:bg-[var(--cocoa-100)]"><X className="size-5" aria-hidden="true" /></button>
@@ -119,26 +114,26 @@ export function PersonaSettings({ persona, onSave, onClose, roleId, returnFocusR
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <label htmlFor="persona-wage-min" className="text-sm font-semibold text-[var(--cocoa-800)]">Minimum wage ($/hr)</label>
-                    <input id="persona-wage-min" type="number" min="0" value={formData.wageMin} onChange={event => setFormData(previous => ({ ...previous, wageMin: Number(event.target.value) }))} className="mt-2 min-h-11 w-full rounded-[var(--radius-md)] border border-[var(--cocoa-200)] bg-white px-4 text-sm text-[var(--cocoa-800)]" />
+                    <input id="persona-wage-min" type="number" min="0" max="1000" step="0.01" value={formData.wageMin} onChange={event => setFormData(previous => ({ ...previous, wageMin: Number(event.target.value) }))} className="mt-2 min-h-11 w-full rounded-[var(--radius-md)] border border-[var(--cocoa-200)] bg-white px-4 text-sm text-[var(--cocoa-800)]" />
                   </div>
                   <div>
                     <label htmlFor="persona-wage-max" className="text-sm font-semibold text-[var(--cocoa-800)]">Maximum wage ($/hr)</label>
-                    <input id="persona-wage-max" type="number" min="0" value={formData.wageMax} onChange={event => setFormData(previous => ({ ...previous, wageMax: Number(event.target.value) }))} className="mt-2 min-h-11 w-full rounded-[var(--radius-md)] border border-[var(--cocoa-200)] bg-white px-4 text-sm text-[var(--cocoa-800)]" />
+                    <input id="persona-wage-max" type="number" min="0" max="1000" step="0.01" value={formData.wageMax} onChange={event => setFormData(previous => ({ ...previous, wageMax: Number(event.target.value) }))} className="mt-2 min-h-11 w-full rounded-[var(--radius-md)] border border-[var(--cocoa-200)] bg-white px-4 text-sm text-[var(--cocoa-800)]" />
                   </div>
                 </div>
-                {wageError ? <p role="alert" className="text-sm text-red-700">Maximum wage must be at least the minimum wage.</p> : null}
+                {wageError ? <p role="alert" className="text-sm text-red-700">Enter wages between $0 and $1,000, with the maximum at least the minimum.</p> : null}
                 <div>
                   <label htmlFor="persona-store-location" className="text-sm font-semibold text-[var(--cocoa-800)]">Store location</label>
                   <div className="relative mt-2">
                     <MapPin className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--cocoa-500)]" aria-hidden="true" />
-                    <input id="persona-store-location" value={formData.storeLocation} onChange={event => setFormData(previous => ({ ...previous, storeLocation: event.target.value }))} className="min-h-11 w-full rounded-[var(--radius-md)] border border-[var(--cocoa-200)] bg-white pl-10 pr-4 text-sm text-[var(--cocoa-800)]" />
+                    <input id="persona-store-location" maxLength={300} value={formData.storeLocation} onChange={event => setFormData(previous => ({ ...previous, storeLocation: event.target.value }))} className="min-h-11 w-full rounded-[var(--radius-md)] border border-[var(--cocoa-200)] bg-white pl-10 pr-4 text-sm text-[var(--cocoa-800)]" />
                   </div>
                 </div>
               </section>
             ) : (
               <section role="tabpanel" aria-label={activeTab === 'dealbreakers' ? 'Dealbreakers' : 'Nice-to-haves'}>
-                <h3 className="font-display text-xl font-semibold text-[var(--cocoa-900)]">{activeTab === 'dealbreakers' ? 'Must pass to advance' : 'Skills that earn extra consideration'}</h3>
-                <p className="mt-1 text-sm leading-6 text-[var(--cocoa-600)]">Toggle the criteria used for {role.title} applicants.</p>
+                <h3 className="font-display text-xl font-semibold text-[var(--cocoa-900)]">{activeTab === 'dealbreakers' ? 'Review criteria' : 'Additional skills to discuss'}</h3>
+                <p className="mt-1 text-sm leading-6 text-[var(--cocoa-600)]">Choose your demo review notes for {role.title} applicants. These do not enforce a pass line.</p>
                 <div className="mt-5 flex flex-wrap gap-2" role="group" aria-label={activeTab === 'dealbreakers' ? 'Configured dealbreakers' : 'Configured nice-to-haves'}>
                   {(activeTab === 'dealbreakers' ? [...new Set([...role.dealbreakers, ...formData.dealbreakers])] : [...new Set([...roleNiceToHaves, ...formData.niceToHaves])]).map(item => {
                     const field = activeTab === 'dealbreakers' ? 'dealbreakers' : 'niceToHaves';
@@ -152,7 +147,7 @@ export function PersonaSettings({ persona, onSave, onClose, roleId, returnFocusR
                 </div>
                 <div className="mt-6 flex gap-2">
                   <label htmlFor="persona-custom-criterion" className="sr-only">Add custom criterion</label>
-                  <input id="persona-custom-criterion" value={customValue} onChange={event => setCustomValue(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addCustom(); } }} placeholder="Add your own…" className="min-h-11 min-w-0 flex-1 rounded-[var(--radius-md)] border border-[var(--cocoa-200)] px-4 text-sm text-[var(--cocoa-800)]" />
+                  <input id="persona-custom-criterion" maxLength={200} value={customValue} onChange={event => setCustomValue(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); addCustom(); } }} placeholder="Add your own…" className="min-h-11 min-w-0 flex-1 rounded-[var(--radius-md)] border border-[var(--cocoa-200)] px-4 text-sm text-[var(--cocoa-800)]" />
                   <button type="button" onClick={addCustom} className="flex min-h-11 items-center gap-1 rounded-[var(--radius-md)] border border-[var(--cocoa-300)] px-3 text-sm font-semibold text-[var(--cocoa-700)] hover:bg-[var(--cocoa-100)]"><Plus className="size-4" aria-hidden="true" /> Add</button>
                 </div>
               </section>

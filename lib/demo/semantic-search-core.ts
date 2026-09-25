@@ -2,6 +2,7 @@ import {
   queryConceptCoveragePercent,
   queryMatchScoreFromSignals,
   type DemoSearchResult,
+  type DemoSearchScope,
 } from '../contracts/demo-semantic-search.ts';
 import {
   SYNTHETIC_CANDIDATE_CORPUS,
@@ -20,7 +21,7 @@ const DECISION_OR_MANIPULATION = /(?:\b(?:hire|reject|disqualify|screen out)\b|\
 const NON_PRINTING = /[\u0000-\u001f\u007f\u200b-\u200f\u2060\ufeff]/u;
 
 const CONCEPTS = [
-  ['coffee service', ['barista', 'coffee', 'cafe', 'espresso', 'milk drinks']],
+  ['coffee service', ['barista', 'coffee', 'cafe', 'espresso', 'milk drinks', 'latte art']],
   ['training', ['train', 'trained', 'trainer', 'training', 'coach', 'coached', 'mentor', 'onboard', 'onboarding', 'new hire']],
   ['leadership', ['lead', 'leader', 'leadership', 'supervise', 'supervised', 'supervisor', 'manager', 'managed', 'shift huddle']],
   ['weekend availability', ['weekend', 'weekends', 'saturday', 'sunday']],
@@ -32,7 +33,7 @@ const CONCEPTS = [
   ['cash handling', ['cash', 'cash drawer', 'register variance', 'cash controls']],
   ['inventory', ['inventory', 'stock', 'stockout', 'cycle count', 'fifo', 'purchase order', 'variance report']],
   ['scheduling', ['schedule', 'scheduling', 'coverage', 'shift swap', 'forecast demand']],
-  ['latte art', ['latte art', 'tulip', 'milk texture', 'drink presentation']],
+  ['latte art', ['latte art']],
   ['bakery', ['baker', 'bakery', 'baking', 'dough', 'bread', 'loaf', 'loaves', 'pastry']],
   ['sourdough', ['sourdough', 'fermentation', 'starter']],
   ['recipe scaling', ['recipe scaling', 'scale recipes', 'scaled formulas', 'batch', 'batches', 'yield']],
@@ -60,6 +61,7 @@ export const CONCEPT_VECTOR_DIMENSIONS = CONCEPTS.length + HASH_DIMENSIONS;
 const STOP_WORDS = new Set([
   'and', 'are', 'for', 'from', 'has', 'have', 'into', 'looking', 'need', 'our',
   'person', 'someone', 'that', 'the', 'their', 'this', 'who', 'with', 'work',
+  'candidate', 'experience', 'experienced', 'skills', 'skill', 'knows', 'can',
 ]);
 
 export type SearchVector = readonly number[];
@@ -86,17 +88,31 @@ function hasTerm(text: string, term: string): boolean {
   return ` ${text} `.includes(` ${normalizedText(term)} `);
 }
 
-function queryEvidenceConceptSignals(
+// Keep assertions separate: an aspiration to work in a cafe is not coffee
+// experience, while availability in the next clause can still support a query.
+// This is a deliberately conservative lexical rule, not a language classifier.
+function positiveEvidenceClauses(value: string, concept?: string): string[] {
+  return value.split(/[.;!?]|\b(?:and|but|however)\b/iu)
+    .map(normalizedText)
+    .filter(clause => {
+      if (/\b(?:no|not|none|never|without|lack|lacks|lacking|cannot|can t|unavailable)\b/u.test(clause)) return false;
+      if (concept === 'entry level') return true;
+      return !/\b(?:seeking|aspiring|hope|hoping|want|wants|eager to|interested in|learning|learn to|first .{0,30}role)\b/u.test(clause);
+    });
+}
+
+export function queryEvidenceConceptSignals(
   query: string,
   evidenceParts: readonly string[],
 ): { recognized: number; matched: number; coverage: number } {
   const normalizedQuery = normalizedText(query);
-  const normalizedEvidence = normalizedText(evidenceParts.join(' '));
   const queryConcepts = CONCEPTS.filter(([, terms]) => (
     terms.some(term => hasTerm(normalizedQuery, term))
   ));
-  const matched = queryConcepts.filter(([, terms]) => (
-    terms.some(term => hasTerm(normalizedEvidence, term))
+  const matched = queryConcepts.filter(([concept, terms]) => (
+    evidenceParts.some(part => positiveEvidenceClauses(part, concept).some(clause => (
+      terms.some(term => hasTerm(clause, term))
+    )))
   )).length;
   return {
     recognized: queryConcepts.length,
@@ -175,21 +191,23 @@ export function inspectDemoSearchQuery(value: string): QueryInspection {
   return { ok: true, query };
 }
 
-export function createConceptVector(value: string): number[] {
-  const text = normalizedText(value);
+export function createConceptVector(value: string, options: { evidence?: boolean } = {}): number[] {
   const vector = Array<number>(CONCEPT_VECTOR_DIMENSIONS).fill(0);
+  const clausesFor = (concept?: string) => options.evidence
+    ? positiveEvidenceClauses(value, concept)
+    : [normalizedText(value)];
 
-  CONCEPTS.forEach(([, terms], conceptIndex) => {
+  CONCEPTS.forEach(([concept, terms], conceptIndex) => {
     let matches = 0;
     for (const term of terms) {
-      if (hasTerm(text, term)) matches += 1;
+      if (clausesFor(concept).some(clause => hasTerm(clause, term))) matches += 1;
     }
     if (matches > 0) vector[conceptIndex] = 1 + Math.min(matches - 1, 3) * 0.2;
   });
 
-  const tokens = new Set(
-    text.split(' ').filter(token => token.length >= 3 && !STOP_WORDS.has(token)),
-  );
+  const tokens = new Set(clausesFor().flatMap(clause => (
+    clause.split(' ').filter(token => token.length >= 3 && !STOP_WORDS.has(token))
+  )));
   for (const token of tokens) {
     const hash = fnv1a(token);
     const bucket = CONCEPTS.length + (hash % HASH_DIMENSIONS);
@@ -224,7 +242,7 @@ export function createFallbackSourceVectors(): SourceBlockVector[] {
   return CANDIDATE_CORPUS.flatMap(candidate => (
     candidate.sourceBlocks.map(sourceBlock => ({
       sourceBlockId: sourceBlock.sourceBlockId,
-      values: createConceptVector(sourceBlockEmbeddingText(sourceBlock)),
+      values: createConceptVector(sourceBlockEmbeddingText(sourceBlock), { evidence: true }),
     }))
   ));
 }
@@ -254,18 +272,34 @@ function assertSourceVectors(sourceVectors: readonly SourceBlockVector[], dimens
   return vectorsById;
 }
 
+export function scopedSyntheticCandidates(scope: DemoSearchScope = {}): readonly SyntheticCandidateProfile[] {
+  const allowedRefs = scope.candidateRefs ? new Set(scope.candidateRefs) : null;
+  return CANDIDATE_CORPUS.filter(candidate => (
+    (!scope.roleId || candidate.roleId === scope.roleId)
+    && (!allowedRefs || allowedRefs.has(candidate.candidateRef))
+  ));
+}
+
+function pairSimilarity(sources: readonly { similarity: number }[]): number {
+  return sources.length === 1
+    ? sources[0].similarity
+    : sources[0].similarity * 0.75 + sources[1].similarity * 0.25;
+}
+
 export function rankSyntheticCandidates(
   query: string,
   queryVector: SearchVector,
   sourceVectors: readonly SourceBlockVector[],
   limit = 5,
+  scope: DemoSearchScope = {},
 ): DemoSearchResult[] {
+  if (Number.isSafeInteger(limit) && limit >= 1 && limit <= 5 && queryVector.length > 0 && queryVector.every(value => value === 0)) return [];
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 5 || !finiteVector(queryVector)) {
     throw new Error('semantic_search_request_vector_invalid');
   }
   const vectorsById = assertSourceVectors(sourceVectors, queryVector.length);
 
-  const retrieved = CANDIDATE_CORPUS.map(candidate => {
+  const retrieved = scopedSyntheticCandidates(scope).map(candidate => {
     const sources = candidate.sourceBlocks
       .map(sourceBlock => ({
         sourceBlock,
@@ -278,12 +312,43 @@ export function rankSyntheticCandidates(
         right.similarity - left.similarity
         || left.sourceBlock.sourceBlockId.localeCompare(right.sourceBlock.sourceBlockId)
       ));
-    const citations = sources.slice(0, 2);
+    // Choose the pair that covers most requirements in the returned evidence.
+    // Break ties by literal-quote coverage, then similarity. This retains a
+    // schedule quote when skills are already established by the profile.
+    const pairs = sources.flatMap((first, index) => (
+      sources.slice(index + 1).map(second => [first, second])
+    ));
+    const pairCoverage = (pair: typeof sources) => queryEvidenceConceptSignals(query, [
+      candidate.headline,
+      ...candidate.skills,
+      ...pair.flatMap(source => [source.sourceBlock.text, ...source.sourceBlock.topics]),
+    ]).matched;
+    const citations = (pairs.length ? pairs : [sources]).sort((left, right) => (
+      pairCoverage(right) - pairCoverage(left)
+      || queryEvidenceConceptSignals(query, right.map(source => source.sourceBlock.text)).matched
+        - queryEvidenceConceptSignals(query, left.map(source => source.sourceBlock.text)).matched
+      || pairSimilarity(right) - pairSimilarity(left)
+      || left.map(source => source.sourceBlock.sourceBlockId).join().localeCompare(
+        right.map(source => source.sourceBlock.sourceBlockId).join(),
+      )
+    ))[0];
     const candidateSimilarity = citations.length === 1
       ? citations[0].similarity
       : (citations[0].similarity * 0.75) + (citations[1].similarity * 0.25);
-    return { candidate, citations, candidateSimilarity };
-  }).sort((left, right) => (
+    const evidence = [
+      candidate.headline,
+      ...candidate.skills,
+      ...citations.flatMap(source => [source.sourceBlock.text, ...source.sourceBlock.topics]),
+    ];
+    const signals = queryEvidenceConceptSignals(query, evidence);
+    const hasQueryEvidence = signals.recognized > 0
+      ? signals.matched > 0
+      : normalizedText(query).split(' ').some(token => (
+        token.length >= 3 && !STOP_WORDS.has(token)
+        && evidence.some(part => positiveEvidenceClauses(part).some(clause => hasTerm(clause, token)))
+      ));
+    return { candidate, citations, candidateSimilarity, hasQueryEvidence };
+  }).filter(result => result.hasQueryEvidence).sort((left, right) => (
     right.candidateSimilarity - left.candidateSimilarity
     || left.candidate.candidateRef.localeCompare(right.candidate.candidateRef)
   )).slice(0, limit);
@@ -364,6 +429,13 @@ export function assertLiteralSourceCitations(results: readonly DemoSearchResult[
   for (const result of results) {
     const candidate = candidatesById.get(result.synthetic_candidate_ref);
     if (!candidate) throw new Error('semantic_search_result_candidate_invalid');
+    if (
+      result.display_name !== candidate.displayName
+      || result.headline !== candidate.headline
+      || result.location !== candidate.location
+      || result.years_experience !== candidate.yearsExperience
+      || JSON.stringify(result.skills) !== JSON.stringify(candidate.skills)
+    ) throw new Error('semantic_search_profile_not_canonical');
     const blocksById = new Map(
       candidate.sourceBlocks.map(sourceBlock => [sourceBlock.sourceBlockId, sourceBlock] as const),
     );
@@ -377,6 +449,12 @@ export function assertLiteralSourceCitations(results: readonly DemoSearchResult[
       ) {
         throw new Error('semantic_search_citation_not_literal');
       }
+    }
+    const canonicalTopics = [...new Set(result.citations.flatMap(citation => (
+      blocksById.get(citation.source_block_id)?.topics ?? []
+    )))].slice(0, 8);
+    if (JSON.stringify(result.evidence_topics) !== JSON.stringify(canonicalTopics)) {
+      throw new Error('semantic_search_topics_not_canonical');
     }
   }
 }

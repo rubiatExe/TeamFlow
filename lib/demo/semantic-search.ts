@@ -3,8 +3,8 @@ import {
   QUERY_MATCH_CONCEPT_COVERAGE_WEIGHT_PERCENT,
   QUERY_MATCH_RETRIEVAL_WEIGHT_PERCENT,
   type DemoSemanticSearchResponse,
+  type DemoSearchScope,
 } from '../contracts/demo-semantic-search.ts';
-import { SYNTHETIC_CANDIDATE_CORPUS } from '../domain/demo-semantic-search-data.ts';
 import { withTraceSpan } from '../observability/tracing.ts';
 import {
   GeminiEmbeddingUnavailableError,
@@ -20,6 +20,7 @@ import {
   createFallbackSourceVectors,
   inspectDemoSearchQuery,
   rankSyntheticCandidates,
+  scopedSyntheticCandidates,
   validateSyntheticCorpus,
 } from './semantic-search-core.ts';
 
@@ -47,6 +48,7 @@ export async function searchSyntheticCandidates(
   rawQuery: string,
   requestId: string,
   dependencies: SearchDependencies = {},
+  scope: DemoSearchScope = {},
 ): Promise<DemoSemanticSearchResponse> {
   const inspected = inspectDemoSearchQuery(rawQuery);
   if (!inspected.ok) {
@@ -59,7 +61,7 @@ export async function searchSyntheticCandidates(
     'demo.semantic_search',
     {
       'teamflow.search.corpus': 'synthetic',
-      'teamflow.search.corpus_size': SYNTHETIC_CANDIDATE_CORPUS.length,
+      'teamflow.search.corpus_size': scopedSyntheticCandidates(scope).length,
       'teamflow.search.limit': 5,
       'teamflow.search.threshold_applied': false,
     },
@@ -82,6 +84,7 @@ export async function searchSyntheticCandidates(
           vectors.queryVector,
           vectors.sourceVectors,
           5,
+          scope,
         );
         retrieval = {
           mode: 'live_embedding',
@@ -92,7 +95,8 @@ export async function searchSyntheticCandidates(
           document_task: 'RETRIEVAL_DOCUMENT',
           corpus: 'synthetic',
           threshold_applied: false,
-          candidate_aggregation: 'top_two_blocks_75_25',
+          candidate_aggregation: 'query_covering_two_blocks_75_25',
+          relevance_filter: 'positive_concept_or_token_overlap',
         };
       } catch (error) {
         if (!(error instanceof GeminiEmbeddingUnavailableError)) throw error;
@@ -107,17 +111,19 @@ export async function searchSyntheticCandidates(
           createConceptVector(inspected.query),
           createFallbackSourceVectors(),
           5,
+          scope,
         );
         retrieval = {
           mode: 'deterministic_fallback',
-          model_id: 'teamflow-concept-vector-v1',
+          model_id: 'teamflow-concept-vector-v2',
           dimensions: CONCEPT_VECTOR_DIMENSIONS,
           metric: 'cosine_similarity',
           query_task: 'RETRIEVAL_QUERY',
           document_task: 'RETRIEVAL_DOCUMENT',
           corpus: 'synthetic',
           threshold_applied: false,
-          candidate_aggregation: 'top_two_blocks_75_25',
+          candidate_aggregation: 'query_covering_two_blocks_75_25',
+          relevance_filter: 'positive_concept_or_token_overlap',
         };
       }
 
@@ -129,7 +135,7 @@ export async function searchSyntheticCandidates(
         query: inspected.query,
         retrieval,
         scoring: {
-          method: 'query_evidence_rescore_v1',
+          method: 'query_evidence_rescore_v2',
           evidence_scope: 'returned_profile_and_citations',
           rerank_scope: 'retrieval_top_5',
           retrieval_weight_percent: QUERY_MATCH_RETRIEVAL_WEIGHT_PERCENT,
@@ -140,7 +146,7 @@ export async function searchSyntheticCandidates(
         },
         results,
         result_count: results.length,
-        corpus_size: SYNTHETIC_CANDIDATE_CORPUS.length,
+        corpus_size: scopedSyntheticCandidates(scope).length,
         latency_ms: latencyMs,
         generated_at: (dependencies.isoNow ?? (() => new Date().toISOString()))(),
         decision_status: 'no_hiring_decision',

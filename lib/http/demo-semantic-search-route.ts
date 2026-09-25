@@ -5,12 +5,13 @@ import {
   DemoSemanticSearchRequestSchema,
   DemoSemanticSearchResponseSchema,
   type DemoSemanticSearchResponse,
+  type DemoSearchScope,
 } from '../contracts/demo-semantic-search.ts';
 import {
   DemoSearchValidationError,
   searchSyntheticCandidates,
 } from '../demo/semantic-search.ts';
-import { assertQueryEvidenceRescores } from '../demo/semantic-search-core.ts';
+import { assertLiteralSourceCitations, assertQueryEvidenceRescores, scopedSyntheticCandidates } from '../demo/semantic-search-core.ts';
 import {
   createDeadlineSignal,
   InvalidRequestFramingError,
@@ -41,7 +42,7 @@ type RateLimitDecision = {
 
 type SearchRouteDependencies = {
   requestIdFactory?: () => string;
-  search?: (query: string, requestId: string) => Promise<DemoSemanticSearchResponse>;
+  search?: (query: string, requestId: string, scope: DemoSearchScope) => Promise<DemoSemanticSearchResponse>;
   rateLimit?: (request: Request) => RateLimitDecision;
   bodyDeadlineMs?: number;
   logError?: (message: string) => void;
@@ -199,14 +200,19 @@ export async function handleDemoSemanticSearchRequest(
       requestId,
       400,
       'invalid_request',
-      'Submit exactly one query between 3 and 280 characters.',
+      'Submit a query between 3 and 280 characters with optional role and fictional-profile filters.',
     );
   }
 
   try {
-    const result = await (dependencies.search ?? searchSyntheticCandidates)(
+    const scope: DemoSearchScope = {
+      roleId: parsed.data.roleId,
+      candidateRefs: parsed.data.candidateRefs,
+    };
+    const result = await (dependencies.search ?? ((query, requestId, scope) => searchSyntheticCandidates(query, requestId, {}, scope)))(
       parsed.data.query,
       requestId,
+      scope,
     );
     const response = DemoSemanticSearchResponseSchema.safeParse(result);
     if (!response.success || response.data.request_id !== requestId) {
@@ -217,6 +223,12 @@ export async function handleDemoSemanticSearchRequest(
       // Recompute from the request itself so an injected search implementation cannot
       // swap the echoed query and manufacture internally consistent scoring signals.
       assertQueryEvidenceRescores(parsed.data.query, response.data.results);
+      assertLiteralSourceCitations(response.data.results);
+      const scopedCorpus = scopedSyntheticCandidates(scope);
+      if (
+        response.data.corpus_size !== scopedCorpus.length
+        || response.data.results.some(result => !scopedCorpus.some(candidate => candidate.candidateRef === result.synthetic_candidate_ref))
+      ) throw new Error('semantic_search_scope_invalid');
     } catch {
       logError('[Demo Search] Search response failed query-rescore validation');
       return errorResponse(requestId, 502, 'search_unavailable', 'Candidate search returned an invalid response.');

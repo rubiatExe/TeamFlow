@@ -44,7 +44,7 @@ function Divider() {
   return <span aria-hidden="true" className="hidden h-6 w-px shrink-0 bg-[var(--cocoa-200)] sm:block" />;
 }
 
-export function StatsBar({ stats }: { stats: DashboardStats }) {
+export function StatsBar({ stats, showScores = true }: { stats: DashboardStats; showScores?: boolean }) {
   const total = useCountUp(stats.total);
   const average = useCountUp(stats.avgScore);
   const newCount = useCountUp(stats.byStatus.pending + stats.byStatus.new);
@@ -61,11 +61,11 @@ export function StatsBar({ stats }: { stats: DashboardStats }) {
           <span className="text-[var(--cocoa-600)]">Applicants</span>
           <strong className="text-[var(--cocoa-800)] tabular-nums">{total}</strong>
         </div>
-        <Divider />
+        {showScores ? <><Divider />
         <div className="hidden shrink-0 items-center gap-2 sm:flex">
           <span className="text-[var(--cocoa-600)]">Avg Score</span>
           <strong className={`${averageColor} tabular-nums`}>{average}</strong>
-        </div>
+        </div></> : null}
         <Divider />
         <div className="flex shrink-0 items-center gap-1.5 rounded-full bg-[var(--status-new-bg)] px-2.5 py-1 font-semibold text-[var(--status-new)]">
           <span aria-hidden="true">🆕</span><span>New</span><span className="tabular-nums">{newCount}</span>
@@ -79,7 +79,7 @@ export function StatsBar({ stats }: { stats: DashboardStats }) {
         <div className="flex shrink-0 items-center gap-1.5 rounded-full bg-[var(--status-hired-bg)] px-2.5 py-1 font-semibold text-[var(--status-hired)]">
           <Check className="size-3.5" aria-hidden="true" /><span>Hired</span><span className="tabular-nums">{hired}</span>
         </div>
-        {stats.topCandidate ? (
+        {showScores && stats.topCandidate ? (
           <>
             <Divider />
             <div className="hidden min-w-0 shrink-0 items-center gap-2 text-[var(--cocoa-700)] md:flex">

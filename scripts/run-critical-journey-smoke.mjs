@@ -116,6 +116,7 @@ async function main() {
     ...process.env,
     NEXT_TELEMETRY_DISABLED: '1',
     TEAMFLOW_OTEL_ENABLED: 'false',
+    TEAMFLOW_PUBLIC_DEMO_LIVE_EMBEDDINGS: 'false',
   };
   delete serverEnvironment.NODE_ENV;
   if (mode === 'development') {

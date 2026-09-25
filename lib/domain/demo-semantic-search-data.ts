@@ -8,6 +8,7 @@ export type SyntheticSourceBlock = {
 
 export type SyntheticCandidateProfile = {
   candidateRef: string;
+  roleId: string;
   displayName: string;
   headline: string;
   location: string;
@@ -21,6 +22,7 @@ export type SyntheticCandidateProfile = {
 export const SYNTHETIC_CANDIDATE_CORPUS = [
   {
     candidateRef: 'SYN-CAND-001',
+    roleId: 'shift_lead',
     displayName: 'Maya T.',
     headline: 'Cafe operations lead',
     location: 'Jersey City, NJ',
@@ -52,6 +54,7 @@ export const SYNTHETIC_CANDIDATE_CORPUS = [
   },
   {
     candidateRef: 'SYN-CAND-002',
+    roleId: 'barista',
     displayName: 'Leo M.',
     headline: 'Specialty coffee barista',
     location: 'Hoboken, NJ',
@@ -83,6 +86,7 @@ export const SYNTHETIC_CANDIDATE_CORPUS = [
   },
   {
     candidateRef: 'SYN-CAND-003',
+    roleId: 'baker',
     displayName: 'Priya S.',
     headline: 'Artisan bakery specialist',
     location: 'Newark, NJ',
@@ -114,6 +118,7 @@ export const SYNTHETIC_CANDIDATE_CORPUS = [
   },
   {
     candidateRef: 'SYN-CAND-004',
+    roleId: 'line_cook',
     displayName: 'Sam R.',
     headline: 'High-volume line cook',
     location: 'Union City, NJ',
@@ -145,6 +150,7 @@ export const SYNTHETIC_CANDIDATE_CORPUS = [
   },
   {
     candidateRef: 'SYN-CAND-005',
+    roleId: 'cashier',
     displayName: 'Jordan E.',
     headline: 'Customer experience associate',
     location: 'Bayonne, NJ',
@@ -176,6 +182,7 @@ export const SYNTHETIC_CANDIDATE_CORPUS = [
   },
   {
     candidateRef: 'SYN-CAND-006',
+    roleId: 'shift_lead',
     displayName: 'Taylor N.',
     headline: 'Restaurant shift supervisor',
     location: 'New York, NY',
@@ -207,6 +214,7 @@ export const SYNTHETIC_CANDIDATE_CORPUS = [
   },
   {
     candidateRef: 'SYN-CAND-007',
+    roleId: 'barista',
     displayName: 'Noah W.',
     headline: 'Entry-level hospitality associate',
     location: 'Secaucus, NJ',
@@ -238,6 +246,7 @@ export const SYNTHETIC_CANDIDATE_CORPUS = [
   },
   {
     candidateRef: 'SYN-CAND-008',
+    roleId: 'prep_cook',
     displayName: 'Amina O.',
     headline: 'Food retail inventory coordinator',
     location: 'Brooklyn, NY',

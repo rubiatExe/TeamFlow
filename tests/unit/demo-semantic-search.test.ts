@@ -3,9 +3,11 @@ import test from 'node:test';
 
 import {
   DemoSemanticSearchResponseSchema,
+  DemoSemanticSearchRequestSchema,
   queryConceptCoveragePercent,
   queryMatchScoreFromSignals,
   type DemoSearchResult,
+  type DemoSearchScope,
 } from '../../lib/contracts/demo-semantic-search.ts';
 import {
   GeminiEmbeddingUnavailableError,
@@ -19,6 +21,7 @@ import {
   createConceptVector,
   createFallbackSourceVectors,
   inspectDemoSearchQuery,
+  queryEvidenceConceptSignals,
   rankSyntheticCandidates,
   sourceBlockEmbeddingText,
 } from '../../lib/demo/semantic-search-core.ts';
@@ -89,9 +92,9 @@ test('deterministic semantic fallback ranks the three example intents as expecte
 
   for (const [query, expectedFirst] of examples) {
     const results = rankSyntheticCandidates(query, createConceptVector(query), sourceVectors);
-    assert.equal(results.length, 5);
+    assert.ok(results.length > 0 && results.length <= 5);
     assert.equal(results[0].display_name, expectedFirst);
-    assert.deepEqual(results.map(result => result.rank), [1, 2, 3, 4, 5]);
+    assert.deepEqual(results.map(result => result.rank), results.map((_, index) => index + 1));
     for (const result of results) {
       assert.equal(
         result.query_concept_coverage,
@@ -149,9 +152,9 @@ test('deterministic fallback recomputes a stable evidence score for each query',
   assert.ok(bakerMaya);
   assert.equal(bakerRun[0].display_name, 'Priya S.');
   assert.equal(bakerRun[0].query_concepts_recognized, 4);
-  assert.equal(bakerRun[0].query_concepts_matched, 3);
-  assert.equal(bakerRun[0].query_concept_coverage, 75);
-  assert.equal(bakerRun[0].query_match_score, 66);
+  assert.equal(bakerRun[0].query_concepts_matched, 4);
+  assert.equal(bakerRun[0].query_concept_coverage, 100);
+  assert.ok(bakerRun[0].citations.some(citation => citation.source_block_id === 'SYN-RES-003-B03'));
   assert.notEqual(baristaMaya.query_match_score, bakerMaya.query_match_score);
 });
 
@@ -193,6 +196,9 @@ test('every returned citation is a literal canonical source block', () => {
     () => assertLiteralSourceCitations(forged),
     /semantic_search_citation_not_literal/u,
   );
+  const inventedProfile = structuredClone(results) as DemoSearchResult[];
+  inventedProfile[0].skills.push('Invented expertise');
+  assert.throws(() => assertLiteralSourceCitations(inventedProfile), /semantic_search_profile_not_canonical/u);
 });
 
 test('search response labels provider fallback and emits relevance, never a hiring score or decision', async () => {
@@ -213,11 +219,12 @@ test('search response labels provider fallback and emits relevance, never a hiri
 
   assert.equal(DemoSemanticSearchResponseSchema.safeParse(response).success, true);
   assert.equal(response.retrieval.mode, 'deterministic_fallback');
-  assert.equal(response.retrieval.model_id, 'teamflow-concept-vector-v1');
+  assert.equal(response.retrieval.model_id, 'teamflow-concept-vector-v2');
   assert.equal(response.retrieval.threshold_applied, false);
-  assert.equal(response.retrieval.candidate_aggregation, 'top_two_blocks_75_25');
+  assert.equal(response.retrieval.candidate_aggregation, 'query_covering_two_blocks_75_25');
+  assert.equal(response.retrieval.relevance_filter, 'positive_concept_or_token_overlap');
   assert.deepEqual(response.scoring, {
-    method: 'query_evidence_rescore_v1',
+    method: 'query_evidence_rescore_v2',
     evidence_scope: 'returned_profile_and_citations',
     rerank_scope: 'retrieval_top_5',
     retrieval_weight_percent: 35,
@@ -442,6 +449,101 @@ test('public route enforces JSON, safety, rate limiting, and response correlatio
     search,
   });
   assert.equal(blocked.status, 403);
+});
+
+test('weekend latte-art search preserves schedule citations and does not credit an aspirational cafe mention', () => {
+  const query = 'Weekend barista who knows latte art';
+  const results = rankSyntheticCandidates(query, createConceptVector(query), createFallbackSourceVectors());
+  const leo = results.find(result => result.display_name === 'Leo M.');
+  const noah = results.find(result => result.display_name === 'Noah W.');
+  const maya = results.find(result => result.display_name === 'Maya T.');
+  assert.ok(leo && noah && maya);
+  assert.equal(results[0], leo);
+  assert.equal(leo.query_concepts_matched, 3);
+  assert.equal(noah.query_concepts_matched, 1, 'only weekend availability is supported');
+  assert.equal(maya.query_concepts_matched, 2, 'milk texture does not establish latte art');
+  assert.ok(leo.query_match_score > noah.query_match_score);
+  assert.deepEqual(new Set(leo.citations.map(citation => citation.source_block_id)), new Set([
+    'SYN-RES-002-B02', 'SYN-RES-002-B03',
+  ]));
+  assert.doesNotThrow(() => assertLiteralSourceCitations(results));
+});
+
+test('concept evidence distinguishes experience from negation and aspiration without erasing positive clauses', () => {
+  for (const evidence of [
+    'No barista or latte art experience.',
+    'Never worked as a barista.',
+    'Seeking a first cafe role.',
+    'Hoping to learn latte art.',
+    'Interested in barista training.',
+    'Latte art experience: none; no coffee experience.',
+  ]) {
+    assert.equal(queryEvidenceConceptSignals('barista latte art', [evidence]).matched, 0, evidence);
+  }
+  assert.deepEqual(queryEvidenceConceptSignals('weekend barista', [
+    'Seeking a first cafe role and available for Saturday and Sunday shifts.',
+  ]), { recognized: 2, matched: 1, coverage: 50 });
+  assert.equal(queryEvidenceConceptSignals('latte art', ['Coached espresso calibration and milk texture.']).matched, 1);
+  assert.equal(queryEvidenceConceptSignals('latte art', ['Milk texture and drink presentation.']).matched, 0);
+});
+
+test('ordinary search intent stays searchable and unrelated queries have no hash-collision matches', () => {
+  const vectors = createFallbackSourceVectors();
+  const morningQuery = 'early morning';
+  assert.ok(rankSyntheticCandidates(morningQuery, createConceptVector(morningQuery), vectors)
+    .some(result => result.display_name === 'Priya S.'));
+  for (const query of ['I want a barista with latte art', 'Interested in a barista with weekend availability']) {
+    const results = rankSyntheticCandidates(query, createConceptVector(query), vectors);
+    assert.ok(results.some(result => result.display_name === 'Leo M.'));
+  }
+  for (const query of ['rocket propulsion astrophysics', 'Kubernetes developer', 'and']) {
+    assert.deepEqual(rankSyntheticCandidates(query, createConceptVector(query), vectors), [], query);
+  }
+});
+
+test('role and visible-profile scopes intersect canonical corpus, including an empty scope', async () => {
+  const query = 'Weekend barista who knows latte art';
+  const search = (scope: DemoSearchScope) => searchSyntheticCandidates(query, REQUEST_ID, { liveEmbeddingEnabled: false }, scope);
+  const baristas = await search({ roleId: 'barista' });
+  assert.equal(baristas.corpus_size, 2);
+  assert.deepEqual(baristas.results.map(result => result.synthetic_candidate_ref), ['SYN-CAND-002', 'SYN-CAND-007']);
+  const onlyNoah = await search({ roleId: 'barista', candidateRefs: ['SYN-CAND-007', 'SYN-CAND-003'] });
+  assert.equal(onlyNoah.corpus_size, 1);
+  assert.deepEqual(onlyNoah.results.map(result => result.synthetic_candidate_ref), ['SYN-CAND-007']);
+  for (const scope of [{ roleId: 'unfilled_role' }, { roleId: 'barista', candidateRefs: [] }]) {
+    const response = await search(scope);
+    assert.equal(response.corpus_size, 0);
+    assert.equal(response.result_count, 0);
+    assert.deepEqual(response.results, []);
+    assert.equal(DemoSemanticSearchResponseSchema.safeParse(response).success, true);
+  }
+  for (const scope of [{ roleId: '' }, { candidateRefs: ['SYN-CAND-999'] }, { candidateRefs: ['real-private-id'] }]) {
+    assert.equal(DemoSemanticSearchRequestSchema.safeParse({ query, ...scope }).success, false);
+  }
+});
+
+test('public route propagates scope and rejects results outside the requested fictional subset', async () => {
+  const makeRequest = (candidateRefs: string[]) => new Request('https://teamflow.test/api/demo/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://teamflow.test' },
+    body: JSON.stringify({ query: 'Weekend barista who knows latte art', roleId: 'barista', candidateRefs }),
+  });
+  const dependencies = {
+    requestIdFactory: () => REQUEST_ID,
+    rateLimit: () => ({ allowed: true, retryAfterSeconds: 0 }),
+    logError: () => undefined,
+  };
+  const scoped = await handleDemoSemanticSearchRequest(makeRequest(['SYN-CAND-002']), {
+    ...dependencies,
+    search: (query, requestId, scope) => searchSyntheticCandidates(query, requestId, { liveEmbeddingEnabled: false }, scope),
+  });
+  assert.equal(scoped.status, 200);
+  assert.deepEqual((await scoped.json()).results.map((result: DemoSearchResult) => result.synthetic_candidate_ref), ['SYN-CAND-002']);
+  const forged = await handleDemoSemanticSearchRequest(makeRequest(['SYN-CAND-002']), {
+    ...dependencies,
+    search: (query, requestId) => searchSyntheticCandidates(query, requestId, { liveEmbeddingEnabled: false }),
+  });
+  assert.equal(forged.status, 502);
 });
 
 test('default limiter isolates hashed client buckets within a bounded window', () => {

@@ -26,6 +26,7 @@ import {
   DemoSemanticSearchErrorSchema,
   DemoSemanticSearchResponseSchema,
   type DemoSearchResult,
+  type DemoSearchScope,
   type DemoSemanticSearchResponse,
 } from '@/lib/contracts/demo-semantic-search';
 
@@ -35,6 +36,14 @@ const EXAMPLE_QUERIES = [
   'Early-morning baker',
   'Shift supervisor with scheduling',
 ] as const;
+const ROLE_EXAMPLES: Record<string, readonly string[]> = {
+  barista: ['Weekend barista', 'Latte art and espresso', 'Customer service and POS'],
+  baker: ['Early-morning baker', 'Sourdough and recipe scaling', 'Food safety and oven operations'],
+  shift_lead: ['Shift supervisor with scheduling', 'Barista training and weekend openings', 'Inventory and team coaching'],
+  cashier: ['Customer service and POS', 'Cash handling', 'Weekend availability'],
+  line_cook: ['Grill and knife skills', 'Food prep and food safety', 'High-volume line cook'],
+  prep_cook: ['Inventory and receiving', 'Food safety', 'Vendor coordination'],
+};
 
 type SearchViewState = {
   response: DemoSemanticSearchResponse | null;
@@ -137,8 +146,10 @@ function ResultCard({ result, debugMode }: { result: DemoSearchResult; debugMode
   );
 }
 
-export function RecruiterSemanticSearch({ debugMode = false }: { debugMode?: boolean }) {
-  const [query, setQuery] = useState(DEFAULT_QUERY);
+export function RecruiterSemanticSearch({ debugMode = false, roleId, candidateRefs }: DemoSearchScope & { debugMode?: boolean }) {
+  const exampleQueries = (roleId && ROLE_EXAMPLES[roleId]) || EXAMPLE_QUERIES;
+  const defaultQuery = !roleId || roleId === 'barista' ? DEFAULT_QUERY : exampleQueries[0];
+  const [query, setQuery] = useState(defaultQuery);
   const [state, setState] = useState<SearchViewState>(INITIAL_STATE);
   const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
   const requestControllerRef = useRef<AbortController | null>(null);
@@ -155,11 +166,12 @@ export function RecruiterSemanticSearch({ debugMode = false }: { debugMode?: boo
       const response = await fetch('/api/demo/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: normalizedQuery }),
+        body: JSON.stringify({ query: normalizedQuery, roleId, candidateRefs }),
         cache: 'no-store',
         signal: controller.signal,
       });
       const payload: unknown = await response.json().catch(() => null);
+      if (controller.signal.aborted) return;
       if (!response.ok) {
         const parsedError = DemoSemanticSearchErrorSchema.safeParse(payload);
         setState({
@@ -181,7 +193,7 @@ export function RecruiterSemanticSearch({ debugMode = false }: { debugMode?: boo
       if (error instanceof DOMException && error.name === 'AbortError') return;
       setState({ response: null, loading: false, error: 'The search service could not be reached. Please try again.', requestId: null });
     }
-  }, []);
+  }, [roleId, candidateRefs]);
 
   useEffect(() => () => requestControllerRef.current?.abort(), []);
 
@@ -197,6 +209,9 @@ export function RecruiterSemanticSearch({ debugMode = false }: { debugMode?: boo
 
   return (
     <section aria-label="Semantic candidate search" className="min-w-0">
+      <p className="mb-3 text-xs leading-5 text-[var(--cocoa-600)]">
+        Demo · fictional profiles only. Search compares résumé wording; it does not recommend who to hire.
+      </p>
       <div className="rounded-[var(--radius-lg)] border border-[var(--cocoa-100)] bg-white p-4 shadow-[var(--shadow-card)] sm:p-6">
         <form role="search" onSubmit={submit}>
           <label htmlFor="semantic-candidate-query" className="sr-only">Describe the candidate experience you need</label>
@@ -214,6 +229,7 @@ export function RecruiterSemanticSearch({ debugMode = false }: { debugMode?: boo
             />
             <button
               type="submit"
+              aria-label={state.loading ? 'Searching' : 'Search fictional profiles'}
               disabled={state.loading || query.trim().length < 3}
               className="flex min-h-11 shrink-0 items-center gap-2 rounded-full bg-[var(--cocoa-700)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--cocoa-600)] disabled:cursor-not-allowed disabled:opacity-50 sm:px-5"
             >
@@ -222,10 +238,10 @@ export function RecruiterSemanticSearch({ debugMode = false }: { debugMode?: boo
               {!state.loading ? <ArrowRight className="hidden size-4 sm:block" aria-hidden="true" /> : null}
             </button>
           </div>
-          <p id="semantic-query-guidance" className="mt-3 text-xs leading-5 text-[var(--cocoa-600)]">Use job-related skills, schedule, and experience. Don’t paste personal contact details.</p>
+          <p id="semantic-query-guidance" className="mt-3 text-xs leading-5 text-[var(--cocoa-600)]">Use job-related skills, schedule, and experience. Don’t paste personal contact details. When Google-powered matching is active, your search text is sent to Google.</p>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold text-[var(--cocoa-600)]">Try:</span>
-            {EXAMPLE_QUERIES.map(example => (
+            {exampleQueries.map(example => (
               <button key={example} type="button" onClick={() => chooseExample(example)} disabled={state.loading} className="min-h-9 rounded-full bg-[var(--cocoa-100)] px-3 text-xs font-medium text-[var(--cocoa-700)] hover:bg-[var(--cocoa-200)] disabled:opacity-50">
                 {example}
               </button>
@@ -253,16 +269,27 @@ export function RecruiterSemanticSearch({ debugMode = false }: { debugMode?: boo
 
       {state.response ? (
         <div className="mt-8">
+          <div role="status" className="mb-5 rounded-[var(--radius-md)] border border-[var(--cocoa-200)] bg-white p-4 text-xs leading-5 text-[var(--cocoa-700)]">
+            <p className="font-semibold">{state.response.retrieval.mode === 'live_embedding' ? 'Google-powered matching' : 'Built-in demo matching'} · Fictional profiles</p>
+            <p className="mt-1">{state.response.warnings.find(warning => warning.startsWith('Google-powered matching')) ?? 'This request used Google-powered matching to search fictional résumé evidence.'}</p>
+          </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <p className="cocoa-label">{state.response.result_count} evidence matches</p>
-              <h2 ref={resultsHeadingRef} tabIndex={-1} className="mt-1 font-display text-2xl font-semibold text-[var(--cocoa-900)]">Best matches for “{state.response.query}”</h2>
+              <p className="cocoa-label">{state.response.result_count} results from {state.response.corpus_size} visible fictional profiles</p>
+              <h2 ref={resultsHeadingRef} tabIndex={-1} className="mt-1 font-display text-2xl font-semibold text-[var(--cocoa-900)]">Results for “{state.response.query}”</h2>
             </div>
             <p className="max-w-sm text-xs leading-5 text-[var(--cocoa-600)]">Query match is rescored on the backend for this search. It is not a fit score or hiring recommendation.</p>
           </div>
           <ol className="mt-5 grid gap-5" aria-label="Smart Search results">
             {state.response.results.map(result => <ResultCard key={result.synthetic_candidate_ref} result={result} debugMode={debugMode} />)}
           </ol>
+          {state.response.result_count === 0 ? (
+            <p className="mt-5 rounded-[var(--radius-md)] bg-[var(--cocoa-50)] p-5 text-sm leading-6 text-[var(--cocoa-700)]">
+              {state.response.corpus_size === 0
+                ? 'No fictional profiles are visible in this role and filter selection. Adjust the board filters or choose another role.'
+                : 'No supporting job-related wording was found in these fictional profiles. Try another skill or schedule, or change the board filters.'}
+            </p>
+          ) : null}
           {debugMode ? (
             <details className="mt-5 rounded-[var(--radius-md)] border border-[var(--cocoa-200)] bg-white p-4 text-xs text-[var(--cocoa-700)]">
               <summary className="cursor-pointer font-semibold">Debug search details</summary>

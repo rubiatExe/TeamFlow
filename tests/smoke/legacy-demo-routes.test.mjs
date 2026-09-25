@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { verifyProductionStyles } from '../../scripts/verify-production-styles.mjs';
 
 const baseUrl = new URL(process.env.TEAMFLOW_SMOKE_BASE_URL).origin;
 const mode = process.env.TEAMFLOW_SMOKE_MODE;
@@ -83,6 +84,31 @@ if (mode === 'development') {
     assertNamedServerRenderedControls(html);
   });
 } else if (mode === 'production') {
+  test('production serves the current Cocoa theme and its matching font variables', async () => {
+    await verifyProductionStyles({ baseUrl });
+  });
+
+  test('public search respects the visible sample candidate scope and cites its evidence', async () => {
+    const response = await request('/api/demo/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: baseUrl, 'Sec-Fetch-Site': 'same-origin' },
+      body: JSON.stringify({
+        query: 'Weekend barista who knows latte art',
+        roleId: 'barista',
+        candidateRefs: ['SYN-CAND-002'],
+      }),
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.result_count, 1);
+    assert.equal(payload.results[0].synthetic_candidate_ref, 'SYN-CAND-002');
+    assert.equal(payload.results[0].display_name, 'Leo M.');
+    assert.ok(payload.results[0].citations.some(citation => /latte art/iu.test(citation.exact_quote)));
+    assert.ok(payload.results[0].citations.some(citation => /Saturday/iu.test(citation.exact_quote)));
+    assert.equal(payload.decision_status, 'no_hiring_decision');
+    assert.ok(['live_embedding', 'deterministic_fallback'].includes(payload.retrieval.mode));
+  });
+
   test('public bakery-owner workspace is available while the legacy candidate page remains closed', async () => {
     const publicResponse = await request('/');
     const html = await publicResponse.text();

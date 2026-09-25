@@ -23,6 +23,7 @@ import { ScoreRing } from '@/components/candidates/score-ring';
 import type { CandidateStatus } from '@/lib/contracts/candidate';
 import type { ParserOutput } from '@/lib/contracts/parser';
 import { getRoleById } from '@/lib/domain/roles';
+import { getDemoProfile } from '@/lib/domain/demo-workspace';
 
 type CandidateActionResult = { ok: true } | { ok: false; message: string };
 
@@ -62,10 +63,10 @@ function nextStatusFor(status: CandidateStatus): CandidateStatus | null {
   return null;
 }
 
-function actionLabel(status: CandidateStatus, firstName: string): string {
-  if (status === 'pending' || status === 'new') return 'Send Interview Invite';
+function actionLabel(status: CandidateStatus, firstName: string, simulated = false): string {
+  if (status === 'pending' || status === 'new') return simulated ? 'Simulate Interview Invite' : 'Send Interview Invite';
   if (status === 'invited') return 'Mark as Interviewed';
-  if (status === 'interviewed') return `Hire ${firstName}`;
+  if (status === 'interviewed') return simulated ? 'Mark as Hired' : `Hire ${firstName}`;
   return 'On the team';
 }
 
@@ -80,6 +81,8 @@ export function CandidateCard({
   onRemove,
 }: CandidateCardProps) {
   const { candidate, score, red_flags: redFlags } = data;
+  const demoProfile = getDemoProfile(candidateId);
+  const simulated = Boolean(demoProfile) || candidateId.startsWith('demo_') || candidateId.startsWith('local_');
   const scorePopoverId = useId();
   const touchStartXRef = useRef<number | null>(null);
   const [scoreOpen, setScoreOpen] = useState(false);
@@ -157,10 +160,10 @@ export function CandidateCard({
             type="button"
             className="flex h-full w-full flex-col items-center justify-center gap-1 text-xs font-semibold"
             onClick={() => { setSwipeX(0); void runAdvance(); }}
-            aria-label={`${actionLabel(status, firstName)} for ${candidate.name}`}
+            aria-label={`${actionLabel(status, firstName, simulated)} for ${candidate.name}`}
           >
             <Phone className="size-5" aria-hidden="true" />
-            {status === 'pending' || status === 'new' ? 'Invite' : status === 'invited' ? 'Interview' : 'Hire'}
+            {status === 'pending' || status === 'new' ? simulated ? 'Demo invite' : 'Invite' : status === 'invited' ? 'Interview' : 'Hire'}
           </button>
         </div>
       ) : null}
@@ -188,7 +191,7 @@ export function CandidateCard({
           tabIndex={0}
           data-candidate-card
           onKeyDown={handleCardKeyDown}
-          aria-label={`${candidate.name}, ${STATUS_LABELS[status]}, fit score ${score.total}`}
+          aria-label={`${candidate.name}, ${STATUS_LABELS[status]}, ${demoProfile ? 'fictional profile' : `fit score ${score.total}`}`}
           className="group relative min-h-[200px] rounded-[var(--radius-lg)] border border-[var(--cocoa-100)] bg-white p-4 shadow-[var(--shadow-card)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-card-hover)] focus-visible:-translate-y-0.5 focus-visible:shadow-[var(--shadow-card-hover)] sm:p-5"
         >
           <div className="flex items-start justify-between gap-3">
@@ -217,7 +220,7 @@ export function CandidateCard({
           </div>
 
           <div className="mt-3 flex flex-col items-center gap-3 text-center sm:flex-row sm:items-start sm:text-left">
-            <div
+            {!demoProfile ? <div
               className="relative order-1 sm:order-3 sm:ml-auto"
               onKeyDown={event => { if (event.key === 'Escape') setScoreOpen(false); }}
               onBlur={event => {
@@ -248,7 +251,7 @@ export function CandidateCard({
                   <p className="mt-3 border-t border-white/20 pt-3 text-xs italic leading-5 text-white/80">{score.explanation}</p>
                 </div>
               ) : null}
-            </div>
+            </div> : null}
             <CandidateAvatar name={candidate.name} />
             <div className="min-w-0 flex-1">
               <h4 className="font-display text-lg font-semibold leading-tight text-[var(--cocoa-900)]">{candidate.name}</h4>
@@ -260,7 +263,9 @@ export function CandidateCard({
                 <span aria-hidden="true">•</span>
                 {candidate.experience_years ?? 0} yrs exp
               </p>
-              {debugMode && candidateId.startsWith('demo_') ? (
+              {demoProfile ? (
+                <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800">Fictional sample · demo stages</p>
+              ) : debugMode && candidateId.startsWith('demo_') ? (
                 <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-amber-800">Synthetic preview record</p>
               ) : null}
             </div>
@@ -284,6 +289,19 @@ export function CandidateCard({
             </div>
           ) : null}
 
+          {demoProfile ? (
+            <details className="mt-4 rounded-[var(--radius-md)] border border-[var(--cocoa-100)] bg-[var(--cocoa-50)] p-3 text-xs text-[var(--cocoa-700)]">
+              <summary className="min-h-6 cursor-pointer font-semibold">Read sample résumé</summary>
+              <p className="mt-2 font-medium">{demoProfile.headline}</p>
+              {demoProfile.sourceBlocks.map(block => (
+                <figure key={block.sourceBlockId} className="mt-3">
+                  <blockquote className="leading-5">“{block.text}”</blockquote>
+                  <figcaption className="mt-1 text-[10px] text-[var(--cocoa-500)]">{block.section} · block {block.blockNumber}</figcaption>
+                </figure>
+              ))}
+            </details>
+          ) : null}
+
           {redFlags.length > 0 ? (
             <div className="mt-3 flex flex-wrap gap-1.5 border-t border-[var(--cocoa-100)] pt-3">
               {redFlags.map(flag => (
@@ -300,7 +318,7 @@ export function CandidateCard({
           >
             {actionState === 'loading' ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> : null}
             {actionState === 'success' || status === 'hired' ? <Check className="size-4" aria-hidden="true" /> : null}
-            {actionState === 'success' ? 'Updated' : actionLabel(status, firstName)}
+            {actionState === 'success' ? 'Updated' : actionLabel(status, firstName, simulated)}
           </button>
 
           {actionError ? <p role="alert" className="mt-2 text-xs text-red-700">{actionError}</p> : null}

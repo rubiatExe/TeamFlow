@@ -173,12 +173,15 @@ test('the unified dashboard embeds an accessible evidence-led Smart Search', () 
   assert.match(page, /Skip to main content/u);
   assert.match(dashboard, /<SmartSearchTab debugMode=\{debugMode\}/u);
   assert.match(smartSearch, /<h2 id="smart-search-tab-title"/u);
-  assert.match(smartSearch, /Every match is rescored for that query and backed by quoted résumé evidence/u);
+  assert.match(smartSearch, /respects the current board filters\. Each result includes quoted résumé evidence/u);
+  assert.match(smartSearch, /candidateRefs=\{candidateRefs\}/u);
+  assert.match(dashboard, /roleId=\{selectedRoleId\} candidateRefs=\{searchCandidateRefs\}/u);
 
   assert.match(search, /<form role="search"/u);
   assert.match(search, /htmlFor="semantic-candidate-query"/u);
   assert.match(search, /aria-describedby="semantic-query-guidance"/u);
   assert.match(search, /maxLength=\{280\}/u);
+  assert.match(search, /aria-label=\{state.loading \? 'Searching' : 'Search fictional profiles'\}/u);
   assert.match(search, /aria-live="polite"/u);
   assert.match(search, /role="alert"/u);
   assert.match(search, /Shift supervisor with scheduling/u);

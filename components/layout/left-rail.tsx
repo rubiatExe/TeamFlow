@@ -4,9 +4,12 @@ import { RotateCcw, SlidersHorizontal } from 'lucide-react';
 
 import type { StageVisibility } from '@/components/candidates/candidate-board';
 import { CAFE_ROLES, getRoleOrDefault } from '@/lib/domain/roles';
+import type { HiringPersona } from '@/lib/domain/demo-workspace';
 
 interface LeftRailProps {
   selectedRoleId: string;
+  personas?: Record<string, HiringPersona>;
+  showScoreFilter?: boolean;
   candidateCounts: Record<string, number>;
   stageVisibility: StageVisibility;
   minScore: number;
@@ -19,6 +22,8 @@ interface LeftRailProps {
 
 export function LeftRail({
   selectedRoleId,
+  personas,
+  showScoreFilter = true,
   candidateCounts,
   stageVisibility,
   minScore,
@@ -29,7 +34,8 @@ export function LeftRail({
   mobile = false,
 }: LeftRailProps) {
   const selectedRole = getRoleOrDefault(selectedRoleId);
-  const filtersActive = minScore > 0 || Object.values(stageVisibility).some(value => !value);
+  const selectedPersona = personas?.[selectedRoleId];
+  const filtersActive = (showScoreFilter && minScore > 0) || Object.values(stageVisibility).some(value => !value);
 
   const clearFilters = () => {
     onMinScoreChange(0);
@@ -60,7 +66,7 @@ export function LeftRail({
                 <span className="text-xl" aria-hidden="true">{role.emoji}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold text-[var(--cocoa-800)]">{role.title}</span>
-                  <span className="mt-0.5 block text-xs text-[var(--cocoa-600)]">${role.wageRange.min}–${role.wageRange.max}/hr</span>
+                  <span className="mt-0.5 block text-xs text-[var(--cocoa-600)]">${personas?.[role.id]?.wageMin ?? role.wageRange.min}–${personas?.[role.id]?.wageMax ?? role.wageRange.max}/hr</span>
                 </span>
                 <span className="rounded-full bg-[var(--cocoa-200)] px-2 py-0.5 text-[11px] font-semibold text-[var(--cocoa-800)]" aria-label={`${candidateCounts[role.id] ?? 0} applicants`}>
                   {candidateCounts[role.id] ?? 0}
@@ -97,7 +103,7 @@ export function LeftRail({
           </div>
         </fieldset>
 
-        <div className="mt-5">
+        {showScoreFilter ? <div className="mt-5">
           <label htmlFor={mobile ? 'minimum-score-mobile' : 'minimum-score'} className="text-xs font-semibold text-[var(--cocoa-700)]">Min score: <span className="tabular-nums">{minScore}</span></label>
           <input
             id={mobile ? 'minimum-score-mobile' : 'minimum-score'}
@@ -110,7 +116,7 @@ export function LeftRail({
             className="mt-3 h-2 w-full cursor-pointer appearance-none rounded-full accent-[var(--cocoa-600)]"
             style={{ background: `linear-gradient(to right, var(--cocoa-600) 0%, var(--cocoa-600) ${minScore}%, var(--cocoa-200) ${minScore}%, var(--cocoa-200) 100%)` }}
           />
-        </div>
+        </div> : null}
 
         {filtersActive ? (
           <button type="button" onClick={clearFilters} className="mt-4 inline-flex min-h-9 items-center gap-1.5 rounded-lg text-xs font-semibold text-[var(--cocoa-600)] hover:underline">
@@ -122,12 +128,14 @@ export function LeftRail({
       <section className="mt-7 border-t border-[var(--cocoa-100)] pt-6">
         <p className="cocoa-label">Dealbreakers</p>
         <div className="mt-3 flex flex-wrap gap-2">
-          {selectedRole.dealbreakers.map(dealbreaker => (
-            <span key={dealbreaker} title="Must pass to advance" className="rounded-[var(--radius-sm)] bg-red-50 px-2.5 py-1.5 text-xs leading-5 text-red-800">
+          {(selectedPersona?.dealbreakers ?? selectedRole.dealbreakers).map(dealbreaker => (
+            <span key={dealbreaker} title="Demo review criterion; not an automatic gate" className="rounded-[var(--radius-sm)] bg-red-50 px-2.5 py-1.5 text-xs leading-5 text-red-800">
               ⚠️ {dealbreaker}
             </span>
           ))}
         </div>
+        {selectedPersona?.dealbreakers.length === 0 ? <p className="mt-2 text-xs text-[var(--cocoa-600)]">No demo dealbreakers selected.</p> : null}
+        {selectedPersona ? <p className="mt-3 text-xs leading-5 text-[var(--cocoa-600)]">Demo review criteria only. Changes do not rescore applicants or block actions.</p> : null}
       </section>
 
       {onOpenHiringSettings ? (

@@ -5,14 +5,20 @@
 TeamFlow transforms the hourly hiring process with AI-powered resume parsing, intelligent candidate scoring, and a frictionless application experience. Built for busy hiring managers who need to make fast, informed decisions.
 
 **Live bakery-owner demo:** [team-floww.vercel.app](https://team-floww.vercel.app/) — a
-read-only hiring workspace for the fictional Cocoa Bakery. An owner can describe an open
-shift in everyday language and review an ordered list drawn from eight fictional profiles.
+sample hiring workspace for the fictional Cocoa Bakery. The candidate board and Smart
+Search share eight fictional profiles. An owner can describe an open shift in everyday
+language and search the selected role's visible sample profiles.
 Every result includes literal citations to its synthetic résumé blocks. The backend
-retrieves five profiles, then reranks them with a query-specific 0–100 blend of visible
+returns up to five profiles, with a query-specific 0–100 blend of visible
 job-concept coverage and retrieval relevance. The score is uncalibrated relevance, not
 candidate fitness; the active retrieval mode is visible, and no hiring decision is automated. See the
 [`public semantic-search demo guide`](docs/public-semantic-search-demo.md) for the exact
 runtime and evidence boundary.
+
+Sample pipeline changes and hiring preferences are saved in this browser only; simulated
+invites never send messages. Preferences update the displayed criteria but do not rescore
+profiles. Public uploads and real applicant mutations remain disabled until an authorized
+production workflow is available. Local connected workflows require the explicit demo opt-in.
 
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org/)
 [![Gemini](https://img.shields.io/badge/Gemini-AI-blue?logo=google)](https://ai.google.dev/)
@@ -35,7 +41,7 @@ TeamFlow uses AI to solve this:
 
 | Feature | How It Helps |
 |---------|-------------|
-| 🔎 **Evidence-Grounded Search Demo** | A manager describes job-related needs and receives five fictional profiles reranked by a backend evidence score, with literal citations and no fit score or hiring recommendation |
+| 🔎 **Evidence-Grounded Search Demo** | A manager describes job-related needs and receives up to five fictional profiles with quoted evidence, visible matching mode, and no fit score or hiring recommendation |
 | 🧠 **Smart Resume Parsing** | Drop a PDF and get validated structured data plus a fit score |
 | 📊 **AI Fit Scoring** | Gemini analyzes each candidate against role-specific requirements |
 | 📱 **Magic Link Invite Demo** | Prototype invite and candidate flow; production token verification and route authorization remain open |
@@ -49,12 +55,14 @@ TeamFlow uses AI to solve this:
 ### Manager Experience
 
 #### Dashboard — Kanban Board
-Candidates organized by status with AI-generated fit scores. Drag-and-drop to move through the pipeline.
+Candidates organized by status. The public workspace uses clearly labelled fictional
+profiles and simulated pipeline actions; sample cards do not present invented fit scores.
 
 ![Manager Dashboard](docs/screenshots/manager-dashboard.png)
 
 #### Hiring Persona Settings
-Define job requirements, dealbreakers, and nice-to-haves. The AI uses this to score every candidate.
+Define job requirements, dealbreakers, and nice-to-haves. In the public demo these are
+browser-local preferences for the displayed role; saving them does not invoke AI scoring.
 
 ![Hiring Settings](docs/screenshots/manager-settings.png)
 
@@ -180,11 +188,17 @@ npm test
 npm audit --audit-level=high
 npm run verify:contracts
 npm run build
+node scripts/verify-production-styles.mjs --url=https://team-floww.vercel.app
 ```
 
 `verify:contracts` checks static WIF, Cloud Run, LangGraph, MCP, OCR, Supabase, and
 model-compatibility wiring for accidental source drift. It does not verify live cloud,
 database, IAM, provider, or deployment state.
+
+`npm run build` also checks that the generated homepage links the current Cocoa theme
+and matching font definitions. Production journey checks repeat this against the served
+CSS. Use the URL command above after deployment to detect stale compiled assets; a 200
+response alone does not establish visual correctness.
 
 The scorer treats Gemini output as untrusted input: responses must satisfy a
 structured-output schema and Zod validation, malformed output receives one

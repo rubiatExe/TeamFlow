@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Check, Coffee, Search, X } from 'lucide-react';
+import { Check, Coffee, RotateCcw, Search, X } from 'lucide-react';
 
 import { CandidateBoard, type StageVisibility } from '@/components/candidates/candidate-board';
 import type { CandidateActionResult } from '@/components/candidates/candidate-card';
@@ -25,7 +25,7 @@ import { useToast } from '@/components/ui/toast';
 import { UploadTab } from '@/components/upload/upload-tab';
 import type { CandidateStatus, CandidateWithStatus, InviteRequest } from '@/lib/contracts/candidate';
 import { deleteCandidateFromSupabase, DEMO_MERCHANT_ID, loadCandidatesFromSupabase, type CandidateRow, updateCandidateStatus } from '@/lib/db/supabase';
-import { demoCandidates } from '@/lib/domain/demo-data';
+import { createDemoCandidates, createDemoPersonas, DEMO_WORKSPACE_STORAGE_KEY, isDemoCandidateId, parseDemoWorkspace, personaForRole, restoreDemoCandidates, serializeDemoWorkspace } from '@/lib/domain/demo-workspace';
 import { CAFE_ROLES, getRoleById, getRoleOrDefault } from '@/lib/domain/roles';
 
 interface ManagerDashboardProps {
@@ -47,20 +47,6 @@ function parseInviteResult(value: unknown): InviteResult | null {
   if (typeof error.message !== 'string' || typeof error.retryable !== 'boolean') return null;
   return { success: false, error: { message: error.message, retryable: error.retryable } };
 }
-
-function personaForRole(roleId: string): HiringPersona {
-  const role = getRoleOrDefault(roleId);
-  return {
-    jobTitle: role.title,
-    wageMin: role.wageRange.min,
-    wageMax: role.wageRange.max,
-    dealbreakers: [...role.dealbreakers],
-    niceToHaves: role.niceToHaveSkills.map(skill => skill.label.replace(/^\S+\s*/u, '')),
-    storeLocation: '475 Central Ave, Jersey City, NJ 07307',
-  };
-}
-
-const INITIAL_PERSONAS = Object.fromEntries(CAFE_ROLES.map(role => [role.id, personaForRole(role.id)]));
 
 function rowToCandidate(row: CandidateRow): CandidateWithStatus {
   const requestedRole = row.analysis?.applied_role || row.job_id || 'barista';
@@ -102,14 +88,16 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
   const mobileSettingsTriggerRef = useRef<HTMLButtonElement>(null);
   const personaReturnFocusRef = useRef<HTMLElement | null>(null);
   const hiredReturnFocusRef = useRef<HTMLElement | null>(null);
-  const [candidates, setCandidates] = useState<CandidateWithStatus[]>(demoCandidates);
+  const [candidates, setCandidates] = useState<CandidateWithStatus[]>(createDemoCandidates);
   const [selectedRoleId, setSelectedRoleId] = useState('barista');
   const [activeTab, setActiveTab] = useState<DashboardTab>('candidates');
-  const [personas, setPersonas] = useState<Record<string, HiringPersona>>(INITIAL_PERSONAS);
+  const [personas, setPersonas] = useState<Record<string, HiringPersona>>(createDemoPersonas);
   const [showSettings, setShowSettings] = useState(false);
   const [showMobileTools, setShowMobileTools] = useState(false);
   const [showHiredModal, setShowHiredModal] = useState<string | null>(null);
   const [usingSampleData, setUsingSampleData] = useState(true);
+  const [demoStorageReady, setDemoStorageReady] = useState(false);
+  const [demoStorageAvailable, setDemoStorageAvailable] = useState(true);
   const [debugMode, setDebugMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [minScore, setMinScore] = useState(0);
@@ -121,6 +109,34 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
     });
     return () => cancelAnimationFrame(frame);
   }, []);
+
+  useEffect(() => {
+    if (interactiveDemoEnabled) return;
+    const frame = requestAnimationFrame(() => {
+      try {
+        const saved = parseDemoWorkspace(window.localStorage.getItem(DEMO_WORKSPACE_STORAGE_KEY));
+        setCandidates(restoreDemoCandidates(saved));
+        setPersonas({ ...createDemoPersonas(), ...saved?.personas });
+      } catch {
+        setDemoStorageAvailable(false);
+      }
+      setDemoStorageReady(true);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [interactiveDemoEnabled]);
+
+  useEffect(() => {
+    if (interactiveDemoEnabled || !demoStorageReady || !demoStorageAvailable) return;
+    try {
+      window.localStorage.setItem(DEMO_WORKSPACE_STORAGE_KEY, serializeDemoWorkspace(candidates, personas));
+    } catch {
+      const frame = requestAnimationFrame(() => {
+        setDemoStorageAvailable(false);
+        addToast('Browser storage is unavailable. Demo changes last for this visit only.', 'warning');
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [addToast, candidates, demoStorageAvailable, demoStorageReady, interactiveDemoEnabled, personas]);
 
   useEffect(() => {
     if (!interactiveDemoEnabled) return;
@@ -137,13 +153,25 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
   const visibleCandidates = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase('en-US');
     return roleCandidates.filter(candidate => {
-      if (candidate.data.score.total < minScore) return false;
+      if (!isDemoCandidateId(candidate.id) && candidate.data.score.total < minScore) return false;
       if (!query) return true;
       return candidate.data.candidate.name.toLocaleLowerCase('en-US').includes(query)
         || candidate.data.candidate.email?.toLocaleLowerCase('en-US').includes(query)
         || candidate.data.candidate.skills.some(skill => skill.toLocaleLowerCase('en-US').includes(query));
     });
   }, [minScore, roleCandidates, searchQuery]);
+
+  const stageVisibleCandidates = useMemo(() => visibleCandidates
+    .filter(candidate => (
+      candidate.status === 'hired'
+      || ((candidate.status === 'new' || candidate.status === 'pending') && stageVisibility.new)
+      || (candidate.status === 'invited' && stageVisibility.invited)
+      || (candidate.status === 'interviewed' && stageVisibility.interviewed)
+    )), [stageVisibility, visibleCandidates]);
+  const searchCandidateRefs = useMemo(() => stageVisibleCandidates
+    .filter(candidate => isDemoCandidateId(candidate.id))
+    .map(candidate => candidate.id), [stageVisibleCandidates]);
+  const hasScoredCandidates = roleCandidates.some(candidate => !isDemoCandidateId(candidate.id));
 
   const candidateCounts = useMemo(() => Object.fromEntries(CAFE_ROLES.map(role => [
     role.id,
@@ -159,8 +187,9 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
       hired: roleCandidates.filter(candidate => candidate.status === 'hired').length,
     };
     const total = roleCandidates.length;
-    const avgScore = total ? Math.round(roleCandidates.reduce((sum, candidate) => sum + candidate.data.score.total, 0) / total) : 0;
-    const top = [...roleCandidates].sort((left, right) => right.data.score.total - left.data.score.total)[0];
+    const scoredCandidates = roleCandidates.filter(candidate => !isDemoCandidateId(candidate.id));
+    const avgScore = scoredCandidates.length ? Math.round(scoredCandidates.reduce((sum, candidate) => sum + candidate.data.score.total, 0) / scoredCandidates.length) : 0;
+    const top = [...scoredCandidates].sort((left, right) => right.data.score.total - left.data.score.total)[0];
     return {
       total,
       avgScore,
@@ -178,7 +207,7 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
   }, []);
 
   const changeStatus = useCallback(async (candidateId: string, nextStatus: CandidateStatus): Promise<boolean> => {
-    if (candidateId.startsWith('demo_') || candidateId.startsWith('local_')) {
+    if (isDemoCandidateId(candidateId) || candidateId.startsWith('demo_') || candidateId.startsWith('local_')) {
       await new Promise(resolve => setTimeout(resolve, 240));
       commitStatus(candidateId, nextStatus);
       return true;
@@ -201,8 +230,9 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
     const candidate = candidates.find(item => item.id === candidateId);
     if (!candidate) return { ok: false, message: 'Candidate could not be found.' };
 
-    if (nextStatus !== 'invited' || candidateId.startsWith('demo_') || candidateId.startsWith('local_')) {
+    if (nextStatus !== 'invited' || isDemoCandidateId(candidateId) || candidateId.startsWith('demo_') || candidateId.startsWith('local_')) {
       const changed = await changeStatus(candidateId, nextStatus);
+      if (changed && nextStatus === 'invited') addToast('Demo invitation simulated. No message was sent.', 'success');
       return changed ? { ok: true } : { ok: false, message: 'The status could not be saved.' };
     }
 
@@ -230,10 +260,10 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
     } catch {
       return { ok: false, message: 'The invitation service could not be reached.' };
     }
-  }, [candidates, changeStatus, commitStatus, interactiveDemoEnabled]);
+  }, [addToast, candidates, changeStatus, commitStatus, interactiveDemoEnabled]);
 
   const handleRemove = useCallback(async (candidateId: string) => {
-    if (!candidateId.startsWith('demo_') && !candidateId.startsWith('local_')) {
+    if (!isDemoCandidateId(candidateId) && !candidateId.startsWith('demo_') && !candidateId.startsWith('local_')) {
       if (!interactiveDemoEnabled || !(await deleteCandidateFromSupabase(candidateId))) {
         addToast('The candidate could not be removed.', 'error');
         return;
@@ -260,15 +290,26 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
     setStageVisibility({ new: true, invited: true, interviewed: true });
   };
 
+  const resetDemo = () => {
+    setCandidates(createDemoCandidates());
+    setPersonas(createDemoPersonas());
+    setSearchQuery('');
+    setMinScore(0);
+    setStageVisibility({ new: true, invited: true, interviewed: true });
+    addToast('Fictional applicants and demo settings restored.', 'success');
+  };
+
   const currentRole = getRoleOrDefault(selectedRoleId);
   const currentPersona = personas[selectedRoleId] ?? personaForRole(selectedRoleId);
   const hiredCandidate = showHiredModal ? candidates.find(candidate => candidate.id === showHiredModal) : undefined;
-  const candidateCountLabel = visibleCandidates.length === roleCandidates.length ? `${roleCandidates.length} applicants` : `${visibleCandidates.length} of ${roleCandidates.length} applicants`;
+  const candidateCountLabel = stageVisibleCandidates.length === roleCandidates.length ? `${roleCandidates.length} applicants` : `${stageVisibleCandidates.length} of ${roleCandidates.length} applicants`;
 
   return (
     <div className="min-h-screen bg-[var(--cocoa-50)] pb-20 md:pb-0">
       <Topbar
         selectedRoleId={selectedRoleId}
+        personas={personas}
+        publicDemo={!interactiveDemoEnabled}
         onRoleSelect={selectRole}
         onUpload={() => setActiveTab('upload')}
         onSettings={() => {
@@ -277,11 +318,13 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
         }}
         settingsTriggerRef={settingsTriggerRef}
       />
-      <StatsBar stats={stats} />
+      <StatsBar stats={stats} showScores={hasScoredCandidates} />
 
       <div className="mx-auto flex max-w-[1600px] items-start">
         <LeftRail
           selectedRoleId={selectedRoleId}
+          personas={personas}
+          showScoreFilter={hasScoredCandidates}
           candidateCounts={candidateCounts}
           stageVisibility={stageVisibility}
           minScore={minScore}
@@ -296,6 +339,16 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
 
         <main id="main-content" className="min-w-0 flex-1 px-4 pb-10 md:px-6 lg:px-8">
           <MainTabs activeTab={activeTab} candidateCount={stats.total} onTabChange={setActiveTab} />
+          {usingSampleData ? (
+            <aside className="mt-4 flex flex-col gap-3 rounded-[var(--radius-md)] border border-[var(--cocoa-200)] bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between" aria-label="Demo workspace notice">
+              <div className="text-xs leading-5 text-[var(--cocoa-700)]">
+                <p className="font-semibold">Demo · fictional applicants</p>
+                <p>Practice the hiring workflow. Invitations are simulated; no messages are sent.</p>
+                <p>{!interactiveDemoEnabled && demoStorageAvailable ? 'Demo stages and settings stay in this browser.' : 'Demo changes last for this page visit only.'}</p>
+              </div>
+              <button type="button" onClick={resetDemo} className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-[var(--radius-md)] border border-[var(--cocoa-300)] px-3 text-xs font-semibold text-[var(--cocoa-700)] hover:bg-[var(--cocoa-50)]"><RotateCcw className="size-3.5" aria-hidden="true" /> Reset demo</button>
+            </aside>
+          ) : null}
           {debugMode ? (
             <div className="mt-4 rounded-[var(--radius-md)] border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-medium text-amber-900" role="note">
               Debug mode · {usingSampleData ? 'sample records' : 'connected records'} · mutating demo routes {interactiveDemoEnabled ? 'enabled locally' : 'closed'}
@@ -305,12 +358,12 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
           <div key={`${activeTab}-${selectedRoleId}`} id={`dashboard-panel-${activeTab}`} role="tabpanel" aria-labelledby={`dashboard-tab-${activeTab}`} className="tab-panel-enter py-6">
             {activeTab === 'candidates' ? (
               <section aria-labelledby="candidates-title">
-                {usingSampleData ? <OnboardingBanner sampleCount={demoCandidates.length} onUpload={() => setActiveTab('upload')} /> : null}
+                {usingSampleData ? <OnboardingBanner sampleCount={stageVisibleCandidates.length} publicDemo={!interactiveDemoEnabled} onUpload={() => setActiveTab('upload')} onSearch={() => setActiveTab('search')} /> : null}
                 <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                   <div>
                     <p className="cocoa-label">{currentRole.emoji} {currentRole.title} pipeline</p>
                     <h2 id="candidates-title" className="mt-1 font-display text-3xl font-semibold text-[var(--cocoa-900)]">Candidates</h2>
-                    <p className="mt-1 text-sm text-[var(--cocoa-600)]">{candidateCountLabel} · sorted by fit score</p>
+                    <p className="mt-1 text-sm text-[var(--cocoa-600)]">{candidateCountLabel} · {usingSampleData ? 'fictional profiles, listed alphabetically' : 'sorted by fit score'}</p>
                   </div>
                   <div className="relative w-full sm:max-w-xs">
                     <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--cocoa-500)]" aria-hidden="true" />
@@ -320,13 +373,14 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
                   </div>
                 </div>
                 <CandidateBoard
-                  candidates={visibleCandidates}
+                  candidates={stageVisibleCandidates}
+                  sampleMode={usingSampleData}
                   stageVisibility={stageVisibility}
                   debugMode={debugMode}
                   onAdvance={handleAdvance}
                   onStatusChange={handleStatusChange}
                   onRemove={handleRemove}
-                  onUpload={() => setActiveTab('upload')}
+                  onUpload={interactiveDemoEnabled ? () => setActiveTab('upload') : undefined}
                 />
               </section>
             ) : null}
@@ -337,10 +391,19 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
                 disabled={!interactiveDemoEnabled}
                 onFileProcessed={handleFileProcessed}
                 onViewCandidates={() => setActiveTab('candidates')}
+                onSearch={() => setActiveTab('search')}
               />
             ) : null}
 
-            {activeTab === 'search' ? <SmartSearchTab debugMode={debugMode} /> : null}
+            {activeTab === 'search' ? usingSampleData ? (
+              <SmartSearchTab debugMode={debugMode} roleId={selectedRoleId} candidateRefs={searchCandidateRefs} />
+            ) : (
+              <section aria-labelledby="connected-search-title" className="rounded-[var(--radius-lg)] border border-[var(--cocoa-200)] bg-white p-6">
+                <h2 id="connected-search-title" className="font-display text-2xl text-[var(--cocoa-900)]">Smart Search is a fictional-profile demo</h2>
+                <p className="mt-2 text-sm leading-6 text-[var(--cocoa-600)]">Your connected applicants are not part of the public search corpus. Use the name, email, and skill filter on Candidates to review this workspace.</p>
+                <button type="button" onClick={() => setActiveTab('candidates')} className="mt-4 min-h-11 rounded-[var(--radius-md)] bg-[var(--cocoa-700)] px-4 text-sm font-semibold text-white">View Candidates</button>
+              </section>
+            ) : null}
           </div>
         </main>
       </div>
@@ -368,6 +431,8 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
           <LeftRail
             mobile
             selectedRoleId={selectedRoleId}
+            personas={personas}
+            showScoreFilter={hasScoredCandidates}
             candidateCounts={candidateCounts}
             stageVisibility={stageVisibility}
             minScore={minScore}
@@ -390,10 +455,11 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
           onSave={persona => {
             setPersonas(previous => ({ ...previous, [selectedRoleId]: persona }));
             setShowSettings(false);
-            addToast('Hiring settings saved for this workspace.', 'success');
+            addToast(!interactiveDemoEnabled && demoStorageAvailable ? 'Demo settings saved in this browser. Applicant scoring is unchanged.' : 'Demo settings updated for this visit. Applicant scoring is unchanged.', 'success');
           }}
           onClose={() => setShowSettings(false)}
           returnFocusRef={personaReturnFocusRef}
+          browserPersistence={!interactiveDemoEnabled && demoStorageAvailable}
         />
       ) : null}
 
@@ -412,7 +478,7 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
               <DialogClose asChild><button type="button" aria-label="Close hired confirmation" className="absolute right-4 top-4 flex size-10 items-center justify-center rounded-full text-[var(--cocoa-600)] hover:bg-[var(--cocoa-100)]"><X className="size-5" aria-hidden="true" /></button></DialogClose>
               <div className="mx-auto flex size-20 items-center justify-center rounded-full bg-[var(--cocoa-100)] text-[var(--cocoa-700)]"><Coffee className="size-10" strokeWidth={1.5} aria-hidden="true" /></div>
               <DialogTitle className="mt-5 font-display text-3xl font-semibold text-[var(--cocoa-900)]">Welcome to the team, {hiredCandidate.data.candidate.name.split(/\s+/u)[0]}! 🎉</DialogTitle>
-              <DialogDescription className="mt-2 text-base leading-6 text-[var(--cocoa-600)]">{hiredCandidate.data.candidate.name} is now marked as hired for {getRoleById(hiredCandidate.data.candidate.applied_role || '')?.title ?? 'this role'}.</DialogDescription>
+              <DialogDescription className="mt-2 text-base leading-6 text-[var(--cocoa-600)]">{hiredCandidate.data.candidate.name} is now marked as hired for {getRoleById(hiredCandidate.data.candidate.applied_role || '')?.title ?? 'this role'}.{isDemoCandidateId(hiredCandidate.id) ? ' This is a fictional demo stage; no applicant was contacted.' : ''}</DialogDescription>
               <div className="mt-6 rounded-[var(--radius-lg)] bg-[var(--sage-50)] p-4 text-left">
                 <p className="font-display text-lg font-semibold text-[var(--sage-700)]">What’s next</p>
                 <ul className="mt-3 space-y-2 text-sm text-[var(--cocoa-700)]">

@@ -19,6 +19,11 @@ const contentSecurityPolicy = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  experimental: {
+    // A restored build emitted old global CSS alongside the new application.
+    // Keep production compilation fresh; the development cache is unaffected.
+    turbopackFileSystemCacheForBuild: false,
+  },
   async headers() {
     return [
       {

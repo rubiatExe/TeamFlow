@@ -5,6 +5,7 @@ import { Inbox, Sparkles, UserCheck } from 'lucide-react';
 
 import { CandidateCard, type CandidateActionResult } from '@/components/candidates/candidate-card';
 import type { CandidateStatus, CandidateWithStatus } from '@/lib/contracts/candidate';
+import { isDemoCandidateId } from '@/lib/domain/demo-workspace';
 
 export type StageVisibility = {
   new: boolean;
@@ -14,6 +15,7 @@ export type StageVisibility = {
 
 interface CandidateBoardProps {
   candidates: CandidateWithStatus[];
+  sampleMode?: boolean;
   stageVisibility: StageVisibility;
   debugMode?: boolean;
   onAdvance?: (candidateId: string, nextStatus: CandidateStatus) => Promise<CandidateActionResult> | CandidateActionResult;
@@ -36,7 +38,7 @@ const LANES: Lane[] = [
   { key: 'hired', label: 'Hired Team', emoji: '🎉', statuses: ['hired'], border: 'border-l-[var(--sage-600)]' },
 ];
 
-function EmptyLane({ lane, hasCandidates, onUpload }: { lane: Lane; hasCandidates: boolean; onUpload?: () => void }) {
+function EmptyLane({ lane, hasCandidates, sampleMode, onUpload }: { lane: Lane; hasCandidates: boolean; sampleMode: boolean; onUpload?: () => void }) {
   if (lane.key === 'review') {
     return (
       <div className="flex min-h-48 flex-col items-center justify-center px-3 py-8 text-center">
@@ -45,7 +47,7 @@ function EmptyLane({ lane, hasCandidates, onUpload }: { lane: Lane; hasCandidate
           {hasCandidates ? 'No applicants match these filters.' : 'No new applicants yet.'}
         </p>
         <p className="mt-1 text-xs leading-5 text-[var(--cocoa-600)]">
-          {hasCandidates ? 'Lower the minimum score or restore the New stage.' : 'Upload résumés or share your application link.'}
+          {sampleMode ? 'Try another role, clear filters, or reset the demo to restore sample profiles.' : hasCandidates ? 'Lower the minimum score or restore the New stage.' : 'Upload résumés or share your application link.'}
         </p>
         {!hasCandidates && onUpload ? (
           <button type="button" onClick={onUpload} className="mt-4 min-h-10 rounded-[var(--radius-md)] bg-[var(--cocoa-700)] px-4 text-xs font-semibold text-white hover:bg-[var(--cocoa-600)]">
@@ -61,7 +63,7 @@ function EmptyLane({ lane, hasCandidates, onUpload }: { lane: Lane; hasCandidate
       <div className="flex min-h-48 flex-col items-center justify-center px-4 py-8 text-center">
         <Sparkles className="size-9 text-[var(--cocoa-300)]" strokeWidth={1.5} aria-hidden="true" />
         <p className="mt-3 text-sm font-medium text-[var(--cocoa-700)]">No one here yet.</p>
-        <p className="mt-1 text-xs leading-5 text-[var(--cocoa-600)]">Ready to invite? Your top-rated candidates are in To Review.</p>
+        <p className="mt-1 text-xs leading-5 text-[var(--cocoa-600)]">{sampleMode ? 'Try a simulated invitation from To Review.' : 'Review the evidence in To Review before inviting an applicant.'}</p>
       </div>
     );
   }
@@ -69,14 +71,15 @@ function EmptyLane({ lane, hasCandidates, onUpload }: { lane: Lane; hasCandidate
   return (
     <div className="flex min-h-48 flex-col items-center justify-center px-4 py-8 text-center">
       <UserCheck className="size-9 text-[var(--sage-500)]" strokeWidth={1.5} aria-hidden="true" />
-      <p className="mt-3 text-sm font-medium text-[var(--sage-700)]">Your first hire starts here 🎂</p>
-      <p className="mt-1 text-xs leading-5 text-[var(--cocoa-600)]">Move your best candidate here when you are ready.</p>
+      <p className="mt-3 text-sm font-medium text-[var(--sage-700)]">{sampleMode ? 'Practice the final stage 🎂' : 'Your first hire starts here 🎂'}</p>
+      <p className="mt-1 text-xs leading-5 text-[var(--cocoa-600)]">{sampleMode ? 'Mark a fictional profile as hired to try the confirmation.' : 'Move an applicant here after making your hiring decision.'}</p>
     </div>
   );
 }
 
 export function CandidateBoard({
   candidates,
+  sampleMode = false,
   stageVisibility,
   debugMode = false,
   onAdvance,
@@ -93,7 +96,13 @@ export function CandidateBoard({
 
   const candidatesForLane = (lane: Lane) => candidates
     .filter(candidate => lane.statuses.includes(candidate.status) && visibleStatuses.has(candidate.status))
-    .sort((left, right) => right.data.score.total - left.data.score.total);
+    .sort((left, right) => {
+      const leftDemo = isDemoCandidateId(left.id);
+      const rightDemo = isDemoCandidateId(right.id);
+      if (leftDemo && rightDemo) return left.data.candidate.name.localeCompare(right.data.candidate.name);
+      if (leftDemo !== rightDemo) return leftDemo ? 1 : -1;
+      return right.data.score.total - left.data.score.total;
+    });
 
   const handleLaneKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
@@ -141,7 +150,7 @@ export function CandidateBoard({
                   onRemove={onRemove}
                 />
               )) : (
-                <EmptyLane lane={lane} hasCandidates={candidates.length > 0} onUpload={onUpload} />
+                <EmptyLane lane={lane} hasCandidates={candidates.length > 0} sampleMode={sampleMode} onUpload={onUpload} />
               )}
             </div>
           </section>

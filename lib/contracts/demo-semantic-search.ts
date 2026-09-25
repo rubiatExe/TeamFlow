@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SYNTHETIC_CANDIDATE_CORPUS } from '../domain/demo-semantic-search-data.ts';
 
 export const QUERY_MATCH_RETRIEVAL_WEIGHT_PERCENT = 35 as const;
 export const QUERY_MATCH_CONCEPT_COVERAGE_WEIGHT_PERCENT = 65 as const;
@@ -25,6 +26,9 @@ export function queryMatchScoreFromSignals(
 
 export const DemoSemanticSearchRequestSchema = z.object({
   query: z.string().min(3).max(280),
+  roleId: z.string().regex(/^[a-z][a-z0-9_]{0,79}$/u).optional(),
+  candidateRefs: z.array(z.enum(SYNTHETIC_CANDIDATE_CORPUS.map(candidate => candidate.candidateRef)))
+    .max(SYNTHETIC_CANDIDATE_CORPUS.length).optional(),
 }).strict();
 
 const DemoCitationSchema = z.object({
@@ -86,18 +90,19 @@ const DemoSearchResultSchema = z.object({
 
 const DemoRetrievalMetadataSchema = z.object({
   mode: z.enum(['live_embedding', 'deterministic_fallback']),
-  model_id: z.enum(['gemini-embedding-001', 'teamflow-concept-vector-v1']),
+  model_id: z.enum(['gemini-embedding-001', 'teamflow-concept-vector-v2']),
   dimensions: z.number().int().positive().max(3_072),
   metric: z.literal('cosine_similarity'),
   query_task: z.literal('RETRIEVAL_QUERY'),
   document_task: z.literal('RETRIEVAL_DOCUMENT'),
   corpus: z.literal('synthetic'),
   threshold_applied: z.literal(false),
-  candidate_aggregation: z.literal('top_two_blocks_75_25'),
+  candidate_aggregation: z.literal('query_covering_two_blocks_75_25'),
+  relevance_filter: z.literal('positive_concept_or_token_overlap'),
 }).strict();
 
 const DemoQueryMatchScoringMetadataSchema = z.object({
-  method: z.literal('query_evidence_rescore_v1'),
+  method: z.literal('query_evidence_rescore_v2'),
   evidence_scope: z.literal('returned_profile_and_citations'),
   rerank_scope: z.literal('retrieval_top_5'),
   retrieval_weight_percent: z.literal(QUERY_MATCH_RETRIEVAL_WEIGHT_PERCENT),
@@ -114,7 +119,7 @@ export const DemoSemanticSearchResponseSchema = z.object({
   scoring: DemoQueryMatchScoringMetadataSchema,
   results: z.array(DemoSearchResultSchema).max(5),
   result_count: z.number().int().min(0).max(5),
-  corpus_size: z.number().int().min(1).max(100),
+  corpus_size: z.number().int().min(0).max(100),
   latency_ms: z.number().int().min(0).max(60_000),
   generated_at: z.iso.datetime(),
   decision_status: z.literal('no_hiring_decision'),
@@ -172,6 +177,7 @@ export const DemoSemanticSearchErrorSchema = z.object({
 }).strict();
 
 export type DemoSemanticSearchRequest = z.infer<typeof DemoSemanticSearchRequestSchema>;
+export type DemoSearchScope = { roleId?: string; candidateRefs?: string[] };
 export type DemoSemanticSearchResponse = z.infer<typeof DemoSemanticSearchResponseSchema>;
 export type DemoSemanticSearchError = z.infer<typeof DemoSemanticSearchErrorSchema>;
 export type DemoSearchResult = z.infer<typeof DemoSearchResultSchema>;
