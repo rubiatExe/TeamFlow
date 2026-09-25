@@ -20,7 +20,7 @@ function DialogOverlay({
   return (
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
-      className={cn("fixed inset-0 z-50 bg-stone-950/50 backdrop-blur-sm", className)}
+      className={cn("fixed inset-0 z-50 bg-[var(--cocoa-900)]/50 backdrop-blur-sm", className)}
       {...props}
     />
   )
@@ -55,7 +55,7 @@ function DialogTitle({
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("font-semibold text-stone-800", className)}
+      className={cn("font-display font-semibold text-[var(--cocoa-800)]", className)}
       {...props}
     />
   )
@@ -68,7 +68,7 @@ function DialogDescription({
   return (
     <DialogPrimitive.Description
       data-slot="dialog-description"
-      className={cn("text-sm text-stone-600", className)}
+      className={cn("text-sm text-[var(--cocoa-600)]", className)}
       {...props}
     />
   )

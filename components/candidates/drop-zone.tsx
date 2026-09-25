@@ -1,278 +1,255 @@
-"use client";
+'use client';
 
-import React, { useState, useCallback, useId, useRef } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
-import { getRoleById } from '@/lib/domain/roles';
+import {
+  type ChangeEvent,
+  type DragEvent,
+  useCallback,
+  useId,
+  useRef,
+  useState,
+} from 'react';
+import { Check, FileText, LoaderCircle, X } from 'lucide-react';
+
 import { useToast } from '@/components/ui/toast';
 import { ParserOutputSchema, type ParserOutput } from '@/lib/contracts/parser';
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const ACCEPTED_TYPES = [
-    'application/pdf',
-    'image/jpeg',
-    'image/png',
-];
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const ACCEPTED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'] as const;
+
+export type ProcessedResume = {
+  result: ParserOutput;
+  candidateId?: string;
+  fileName: string;
+};
 
 interface DropZoneProps {
-    onFileProcessed: (result: ParserOutput) => void;
-    roleId?: string;
+  onFileProcessed: (processed: ProcessedResume) => void;
+  onViewCandidates?: () => void;
+  roleId?: string;
+  disabled?: boolean;
 }
 
-interface FileStatus {
-    name: string;
-    status: 'uploading' | 'success' | 'error';
-    error?: string;
-}
+type FileStatus = {
+  id: string;
+  name: string;
+  status: 'uploading' | 'success' | 'error';
+  candidateName?: string;
+  score?: number;
+  error?: string;
+};
 
-export function DropZone({ onFileProcessed, roleId }: DropZoneProps) {
-    const [isDragging, setIsDragging] = useState(false);
-    const [fileStatuses, setFileStatuses] = useState<FileStatus[]>([]);
-    const fileInputRef = useRef<HTMLInputElement>(null);
-    const fileInputId = useId();
-    const helpId = useId();
-    const { addToast } = useToast();
-
-    const role = roleId ? getRoleById(roleId) : undefined;
-
-    const validateFile = (file: File): string | null => {
-        if (file.size > MAX_FILE_SIZE) {
-            return `File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Max 10MB.`;
-        }
-        const isAccepted = ACCEPTED_TYPES.includes(file.type);
-        if (!isAccepted) {
-            return `Unsupported file type: ${file.type || 'unknown'}`;
-        }
-        return null;
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('The file could not be read.'));
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error('The file could not be read.'));
+        return;
+      }
+      const commaIndex = reader.result.indexOf(',');
+      resolve(commaIndex >= 0 ? reader.result.slice(commaIndex + 1) : reader.result);
     };
+    reader.readAsDataURL(file);
+  });
+}
 
-    const processFiles = useCallback(async (files: File[]) => {
-        // Validate all files first
-        const validFiles: File[] = [];
-        for (const file of files) {
-            const error = validateFile(file);
-            if (error) {
-                addToast(`${file.name}: ${error}`, 'error', 5000);
-            } else {
-                validFiles.push(file);
-            }
+function candidateIdFromPayload(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object' || !('candidateId' in payload)) return undefined;
+  const candidateId = (payload as { candidateId?: unknown }).candidateId;
+  return typeof candidateId === 'string' && candidateId.trim() ? candidateId : undefined;
+}
+
+export function DropZone({ onFileProcessed, onViewCandidates, roleId, disabled = false }: DropZoneProps) {
+  const [isDragging, setIsDragging] = useState(false);
+  const [fileStatuses, setFileStatuses] = useState<FileStatus[]>([]);
+  const [showViewLink, setShowViewLink] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const inputId = useId();
+  const helpId = useId();
+  const { addToast } = useToast();
+
+  const validateFile = (file: File): string | null => {
+    if (file.size > MAX_FILE_SIZE) return `File is ${(file.size / 1024 / 1024).toFixed(1)}MB; the limit is 10MB.`;
+    if (!(ACCEPTED_TYPES as readonly string[]).includes(file.type)) return 'Use a PDF, JPG, or PNG file.';
+    return null;
+  };
+
+  const processFiles = useCallback(async (files: File[]) => {
+    if (disabled) return;
+    const accepted: Array<{ file: File; id: string }> = [];
+    files.forEach((file, index) => {
+      const error = validateFile(file);
+      if (error) {
+        addToast(`${file.name}: ${error}`, 'error', 5_000);
+      } else {
+        accepted.push({ file, id: `${Date.now()}-${index}-${file.name}` });
+      }
+    });
+    if (accepted.length === 0) return;
+
+    setShowViewLink(false);
+    setFileStatuses(previous => [
+      ...accepted.map(({ file, id }) => ({ id, name: file.name, status: 'uploading' as const })),
+      ...previous,
+    ]);
+
+    let successes = 0;
+    let errors = 0;
+    for (const { file, id } of accepted) {
+      try {
+        const response = await fetch('/api/parser', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileData: await fileToBase64(file),
+            mimeType: file.type,
+            fileName: file.name,
+            roleId,
+          }),
+        });
+        const payload: unknown = await response.json().catch(() => null);
+        if (!response.ok) {
+          const message = response.status === 429
+            ? 'The résumé service is busy. Wait a moment and try again.'
+            : 'This résumé could not be analyzed.';
+          setFileStatuses(previous => previous.map(item => item.id === id ? { ...item, status: 'error', error: message } : item));
+          addToast(`${file.name}: ${message}`, response.status === 429 ? 'warning' : 'error', 5_000);
+          errors += 1;
+          continue;
         }
 
-        if (validFiles.length === 0) return;
-
-        // Initialize status for all valid files
-        setFileStatuses(validFiles.map(f => ({ name: f.name, status: 'uploading' })));
-
-        let successCount = 0;
-        let errorCount = 0;
-
-        for (const file of validFiles) {
-            const fileName = file.name;
-
-            try {
-                // Convert file to base64 and send directly to parser
-                const arrayBuffer = await file.arrayBuffer();
-                const base64 = Buffer.from(arrayBuffer).toString('base64');
-                const mimeType = file.type || 'application/pdf';
-
-                const response = await fetch('/api/parser', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        fileData: base64,
-                        mimeType: mimeType,
-                        fileName: fileName,
-                        roleId: roleId,
-                    }),
-                });
-
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    const errorMsg = errorData?.details || errorData?.error || `HTTP ${response.status}`;
-
-                    // Special handling for rate limits
-                    if (response.status === 429 || (typeof errorMsg === 'string' && errorMsg.includes('quota'))) {
-                        addToast(`Rate limit hit. Please wait 30 seconds and try again.`, 'warning', 6000);
-                    } else {
-                        addToast(`Failed to parse ${fileName}: ${errorMsg}`, 'error', 5000);
-                    }
-
-                    setFileStatuses(prev => prev.map(f =>
-                        f.name === fileName ? { ...f, status: 'error', error: errorMsg } : f
-                    ));
-                    errorCount++;
-                    continue;
-                }
-
-                const result = await response.json();
-                const parsedResult = ParserOutputSchema.safeParse(result);
-
-                if (parsedResult.success) {
-                    onFileProcessed(parsedResult.data);
-                    setFileStatuses(prev => prev.map(f =>
-                        f.name === fileName ? { ...f, status: 'success' } : f
-                    ));
-                    successCount++;
-                    addToast(`${parsedResult.data.candidate.name || fileName} processed for local demo review`, 'success');
-                } else {
-                    addToast(`Unexpected response format for ${fileName}`, 'error');
-                    setFileStatuses(prev => prev.map(f =>
-                        f.name === fileName ? { ...f, status: 'error', error: 'Bad response' } : f
-                    ));
-                    errorCount++;
-                }
-
-            } catch (err) {
-                console.error('Error processing file:', err);
-                addToast(`Network error processing ${fileName}`, 'error');
-                setFileStatuses(prev => prev.map(f =>
-                    f.name === fileName ? { ...f, status: 'error', error: 'Network error' } : f
-                ));
-                errorCount++;
-            }
+        const parsed = ParserOutputSchema.safeParse(payload);
+        if (!parsed.success) {
+          const message = 'The analysis response was incomplete.';
+          setFileStatuses(previous => previous.map(item => item.id === id ? { ...item, status: 'error', error: message } : item));
+          addToast(`${file.name}: ${message}`, 'error');
+          errors += 1;
+          continue;
         }
 
-        // Batch summary toast
-        if (validFiles.length > 1) {
-            addToast(
-                `Batch complete: ${successCount} succeeded, ${errorCount} failed`,
-                errorCount > 0 ? 'warning' : 'success'
-            );
-        }
+        const processed: ProcessedResume = {
+          result: parsed.data,
+          candidateId: candidateIdFromPayload(payload),
+          fileName: file.name,
+        };
+        onFileProcessed(processed);
+        setFileStatuses(previous => previous.map(item => item.id === id ? {
+          ...item,
+          status: 'success',
+          candidateName: parsed.data.candidate.name,
+          score: parsed.data.score.total,
+        } : item));
+        successes += 1;
+        setTimeout(() => {
+          setFileStatuses(previous => previous.filter(item => item.id !== id));
+          setShowViewLink(true);
+        }, 5_000);
+      } catch {
+        const message = 'The résumé service could not be reached.';
+        setFileStatuses(previous => previous.map(item => item.id === id ? { ...item, status: 'error', error: message } : item));
+        addToast(`${file.name}: ${message}`, 'error');
+        errors += 1;
+      }
+    }
 
-        // Clear statuses after a delay
-        setTimeout(() => setFileStatuses([]), 4000);
+    if (accepted.length > 1) {
+      addToast(`Batch complete: ${successes} processed, ${errors} failed.`, errors > 0 ? 'warning' : 'success');
+    }
+  }, [addToast, disabled, onFileProcessed, roleId]);
 
-    }, [onFileProcessed, roleId, addToast]);
+  const handleInput = async (event: ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files) await processFiles(Array.from(event.target.files));
+    event.target.value = '';
+  };
 
-    const handleDrop = useCallback(async (e: React.DragEvent<HTMLDivElement>) => {
-        e.preventDefault();
-        setIsDragging(false);
-        const files = Array.from(e.dataTransfer.files);
-        await processFiles(files);
-    }, [processFiles]);
+  const handleDrop = async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDragging(false);
+    await processFiles(Array.from(event.dataTransfer.files));
+  };
 
-    const handleFileInput = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files) {
-            const files = Array.from(e.target.files);
-            await processFiles(files);
-            e.target.value = '';
-        }
-    }, [processFiles]);
+  const uploadingCount = fileStatuses.filter(file => file.status === 'uploading').length;
 
-    const handleClick = useCallback(() => {
-        fileInputRef.current?.click();
-    }, []);
-
-    const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-        e.preventDefault();
-        setIsDragging(true);
-    }, []);
-
-    const handleDragLeave = useCallback(() => {
-        setIsDragging(false);
-    }, []);
-
-    const uploadingCount = fileStatuses.filter(f => f.status === 'uploading').length;
-    const totalCount = fileStatuses.length;
-
-    return (
-        <Card
-            aria-busy={uploadingCount > 0}
-            className={`border-2 border-dashed transition-all duration-200 rounded-2xl bg-white ${isDragging
-                ? 'border-lime-500 bg-lime-50'
-                : 'border-stone-300 hover:border-stone-400 hover:bg-stone-50'
-                }`}
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
+  return (
+    <div>
+      <div
+        onDrop={handleDrop}
+        onDragOver={event => { event.preventDefault(); if (!disabled) setIsDragging(true); }}
+        onDragLeave={() => setIsDragging(false)}
+        aria-busy={uploadingCount > 0}
+        className={`flex min-h-[280px] flex-col items-center justify-center rounded-[var(--radius-lg)] border-2 p-6 text-center transition-all ${
+          isDragging
+            ? 'border-solid border-[var(--cocoa-600)] bg-[var(--cocoa-100)]'
+            : 'border-dashed border-[var(--cocoa-300)] bg-[var(--cocoa-50)]'
+        } ${disabled ? 'cursor-not-allowed opacity-70' : ''}`}
+      >
+        <input
+          ref={inputRef}
+          id={inputId}
+          type="file"
+          multiple
+          accept=".pdf,.jpg,.jpeg,.png"
+          disabled={disabled}
+          aria-label="Choose résumé files"
+          aria-describedby={helpId}
+          onChange={handleInput}
+          className="sr-only"
+        />
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 80 80"
+          fill="none"
+          className={`size-16 text-[var(--cocoa-300)] ${isDragging ? 'animate-[upload-bounce_600ms_ease-in-out_infinite]' : ''}`}
         >
-            <input
-                id={fileInputId}
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept=".pdf,.jpg,.jpeg,.png"
-                aria-label="Choose resume files"
-                onChange={handleFileInput}
-                aria-describedby={helpId}
-                className="sr-only"
-            />
-            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="text-5xl mb-4">📄</div>
-                <h3 className="text-xl font-semibold mb-2 text-stone-700">Drop Resumes Here</h3>
+          <path d="M22 8h25l12 12v46a6 6 0 0 1-6 6H22a6 6 0 0 1-6-6V14a6 6 0 0 1 6-6Z" stroke="currentColor" strokeWidth="3" />
+          <path d="M47 8v14h12M28 38h19M28 49h12" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+          <path d="m50 52 8-8 8 8M58 45v18" stroke="var(--cocoa-600)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <h3 className="mt-4 font-display text-2xl font-semibold text-[var(--cocoa-800)]">
+          <span className="md:hidden">Tap to choose résumés</span>
+          <span className="hidden md:inline">Drop résumés here</span>
+        </h3>
+        <p id={helpId} className="mt-2 text-sm text-[var(--cocoa-600)]">PDF, JPG, PNG · Max 10MB each</p>
+        {disabled ? (
+          <p className="mt-4 max-w-sm text-sm leading-6 text-[var(--cocoa-700)]">Résumé processing is disabled in the public preview.</p>
+        ) : (
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            className="mt-5 min-h-11 rounded-[var(--radius-md)] border border-[var(--cocoa-700)] bg-white px-5 text-sm font-semibold text-[var(--cocoa-700)] transition hover:bg-[var(--cocoa-100)]"
+          >
+            Browse files
+          </button>
+        )}
+      </div>
 
-                {role && (
-                    <div className="mb-2 px-3 py-1 bg-lime-100 text-lime-700 rounded-lg text-sm font-medium inline-flex items-center gap-1.5">
-                        <span>{role.emoji}</span>
-                        <span>Local demo analysis role: {role.title}</span>
-                    </div>
-                )}
-
-                <p className="text-stone-600 text-sm">Drop files here or</p>
-                <button
-                    type="button"
-                    onClick={handleClick}
-                    className="mt-2 min-h-11 rounded-lg border border-lime-700 px-4 py-2 text-sm font-medium text-lime-800 hover:bg-lime-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-600 focus-visible:ring-offset-2"
-                >
-                    Browse files
-                </button>
-                <p id={helpId} className="text-stone-500 text-xs mt-1">
-                    PDF, JPG, PNG • Max 10MB
+      {fileStatuses.length > 0 ? (
+        <div className="mt-5 space-y-2" role="status" aria-live="polite" aria-label="Résumé processing queue">
+          {fileStatuses.map(file => (
+            <div key={file.id} className={`file-row-enter flex items-center gap-3 rounded-[var(--radius-md)] border p-3 ${
+              file.status === 'success' ? 'border-green-200 bg-[var(--sage-50)]' : file.status === 'error' ? 'border-red-200 bg-red-50' : 'border-[var(--cocoa-100)] bg-white'
+            }`}>
+              {file.status === 'uploading' ? <LoaderCircle className="size-5 shrink-0 animate-spin text-[var(--cocoa-600)]" aria-hidden="true" /> : null}
+              {file.status === 'success' ? <Check className="size-5 shrink-0 text-[var(--sage-700)]" aria-hidden="true" /> : null}
+              {file.status === 'error' ? <X className="size-5 shrink-0 text-red-700" aria-hidden="true" /> : null}
+              <FileText className="size-4 shrink-0 text-[var(--cocoa-500)]" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-[var(--cocoa-800)]">{file.name}</p>
+                <p className={`mt-0.5 text-xs ${file.status === 'error' ? 'text-red-700' : 'text-[var(--cocoa-600)]'}`}>
+                  {file.status === 'uploading' ? 'Analyzing résumé…' : file.status === 'success' ? `Found: ${file.candidateName} · Score: ${file.score}` : file.error}
                 </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
-                {fileStatuses.length > 0 && (
-                    <div
-                        className="mt-6 w-full max-w-sm"
-                        role="status"
-                        aria-live="polite"
-                        aria-atomic="true"
-                    >
-                        {/* Batch progress header */}
-                        {totalCount > 1 && (
-                            <div className="mb-3 flex items-center justify-between text-sm">
-                                <span className="text-stone-600 font-medium">
-                                    Processing {totalCount - uploadingCount} / {totalCount}
-                                </span>
-                                <div
-                                    className="w-24 h-1.5 bg-stone-200 rounded-full overflow-hidden"
-                                    role="progressbar"
-                                    aria-label="File processing progress"
-                                    aria-valuemin={0}
-                                    aria-valuemax={totalCount}
-                                    aria-valuenow={totalCount - uploadingCount}
-                                >
-                                    <div
-                                        className="h-full bg-lime-500 rounded-full transition-all duration-500"
-                                        style={{ width: `${((totalCount - uploadingCount) / totalCount) * 100}%` }}
-                                    />
-                                </div>
-                            </div>
-                        )}
-
-                        {fileStatuses.map(file => (
-                            <div key={file.name} className={`flex items-center gap-3 p-3 rounded-xl mb-2 ${file.status === 'uploading' ? 'bg-stone-100' :
-                                    file.status === 'success' ? 'bg-lime-50' :
-                                        'bg-red-50'
-                                }`}>
-                                {file.status === 'uploading' && (
-                                    <div className="animate-spin h-4 w-4 border-2 border-lime-500 border-t-transparent rounded-full flex-shrink-0"></div>
-                                )}
-                                {file.status === 'success' && <span className="text-lime-700 flex-shrink-0">✓</span>}
-                                {file.status === 'error' && <span className="text-red-700 flex-shrink-0">✕</span>}
-                                <span className="text-sm truncate flex-1 text-stone-600">{file.name}</span>
-                                <span className={`text-xs font-medium ${file.status === 'uploading' ? 'text-lime-700' :
-                                        file.status === 'success' ? 'text-lime-700' :
-                                            'text-red-700'
-                                    }`}>
-                                    {file.status === 'uploading' ? 'Processing…' :
-                                        file.status === 'success' ? 'Done' :
-                                            'Failed'}
-                                </span>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </CardContent>
-        </Card>
-    );
+      {showViewLink && onViewCandidates ? (
+        <button type="button" onClick={onViewCandidates} className="mt-4 min-h-11 text-sm font-semibold text-[var(--cocoa-700)] hover:underline">
+          View in Candidates →
+        </button>
+      ) : null}
+    </div>
+  );
 }

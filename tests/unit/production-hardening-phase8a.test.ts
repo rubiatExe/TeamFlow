@@ -163,14 +163,17 @@ test('magic links remain an explicit local demo and have no production fallback 
   assert.equal(verifyMagicToken(token)?.candidateId, 'demo-candidate');
 });
 
-test('public synthetic search is available while the legacy candidate portal remains gated', () => {
+test('the public Cocoa dashboard receives the local-only capability while the candidate portal remains gated', () => {
   const publicPage = readFileSync('app/page.tsx', 'utf8');
+  const dashboard = readFileSync('components/candidates/manager-dashboard.tsx', 'utf8');
   const candidatePage = readFileSync('app/apply/page.tsx', 'utf8');
 
-  assert.match(publicPage, /RecruiterSemanticSearch/u);
-  assert.match(publicPage, /Demo uses 8 fictional profiles/u);
-  assert.match(publicPage, /Read-only search/u);
-  assert.doesNotMatch(publicPage, /ManagerDashboard|legacyDemoRoutesEnabled|notFound\(\)/u);
+  assert.match(publicPage, /ManagerDashboard/u);
+  assert.match(publicPage, /interactiveDemoEnabled=\{legacyDemoRoutesEnabled\(\)\}/u);
+  assert.doesNotMatch(publicPage, /notFound\(\)/u);
+  assert.match(dashboard, /if \(!interactiveDemoEnabled\) return;/u);
+  assert.match(dashboard, /Invitations are disabled in the public preview/u);
+  assert.match(dashboard, /disabled=\{!interactiveDemoEnabled\}/u);
   assert.match(candidatePage, /legacyDemoRoutesEnabled\(\)/u);
   assert.match(candidatePage, /notFound\(\)/u);
 });

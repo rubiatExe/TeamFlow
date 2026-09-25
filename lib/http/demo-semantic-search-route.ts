@@ -10,6 +10,7 @@ import {
   DemoSearchValidationError,
   searchSyntheticCandidates,
 } from '../demo/semantic-search.ts';
+import { assertQueryEvidenceRescores } from '../demo/semantic-search-core.ts';
 import {
   createDeadlineSignal,
   InvalidRequestFramingError,
@@ -210,6 +211,14 @@ export async function handleDemoSemanticSearchRequest(
     const response = DemoSemanticSearchResponseSchema.safeParse(result);
     if (!response.success || response.data.request_id !== requestId) {
       logError('[Demo Search] Search response failed contract validation');
+      return errorResponse(requestId, 502, 'search_unavailable', 'Candidate search returned an invalid response.');
+    }
+    try {
+      // Recompute from the request itself so an injected search implementation cannot
+      // swap the echoed query and manufacture internally consistent scoring signals.
+      assertQueryEvidenceRescores(parsed.data.query, response.data.results);
+    } catch {
+      logError('[Demo Search] Search response failed query-rescore validation');
       return errorResponse(requestId, 502, 'search_unavailable', 'Candidate search returned an invalid response.');
     }
     return Response.json(response.data, { headers: RESPONSE_HEADERS });

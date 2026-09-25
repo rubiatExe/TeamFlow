@@ -4,15 +4,13 @@ import {
   type FormEvent,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
 } from 'react';
 import {
   ArrowRight,
-  CheckCircle2,
-  Clock3,
   FileText,
-  ListChecks,
   LoaderCircle,
   MapPin,
   Quote,
@@ -22,20 +20,20 @@ import {
   Sparkles,
 } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { CandidateAvatar } from '@/components/candidates/candidate-avatar';
+import { ScoreRing } from '@/components/candidates/score-ring';
 import {
   DemoSemanticSearchErrorSchema,
   DemoSemanticSearchResponseSchema,
-  type DemoSemanticSearchResponse,
   type DemoSearchResult,
+  type DemoSemanticSearchResponse,
 } from '@/lib/contracts/demo-semantic-search';
 
-const DEFAULT_QUERY = 'Barista who can train new team members and open on weekends';
+const DEFAULT_QUERY = 'Weekend barista who knows latte art';
 const EXAMPLE_QUERIES = [
-  DEFAULT_QUERY,
-  'Early-morning baker experienced in sourdough and recipe scaling',
-  'Shift leader with scheduling, inventory, and high-volume service',
+  'Weekend barista',
+  'Early-morning baker',
+  'Shift supervisor with scheduling',
 ] as const;
 
 type SearchViewState = {
@@ -45,128 +43,92 @@ type SearchViewState = {
   loading: boolean;
 };
 
-const INITIAL_STATE: SearchViewState = {
-  response: null,
-  error: null,
-  requestId: null,
-  loading: false,
-};
+const INITIAL_STATE: SearchViewState = { response: null, error: null, requestId: null, loading: false };
 
-function ResultCard({ result }: { result: DemoSearchResult }) {
-  const citationCount = new Set(
-    result.citations.map(citation => citation.source_block_id),
-  ).size;
-  const evidenceTopics = [...new Map(
-    result.evidence_topics
-      .map(topic => topic.normalize('NFKC').trim().replace(/\s+/gu, ' '))
-      .filter(Boolean)
-      .map(topic => [topic.toLocaleLowerCase('en-US'), topic]),
-  ).values()];
+function ResultCard({ result, debugMode }: { result: DemoSearchResult; debugMode: boolean }) {
+  const [scoreOpen, setScoreOpen] = useState(false);
+  const scorePopoverId = useId();
 
   return (
     <li>
-      <article className="overflow-hidden rounded-2xl border border-[#ded4c8] bg-white shadow-[0_8px_28px_rgba(76,46,32,0.06)]">
+      <article className="overflow-visible rounded-[var(--radius-lg)] border border-[var(--cocoa-100)] bg-white shadow-[var(--shadow-card)] transition-shadow hover:shadow-[var(--shadow-card-hover)]">
         <div className="grid md:grid-cols-[0.78fr_1.22fr]">
-          <div className="p-5 sm:p-6">
-            <p className="text-xs font-bold uppercase tracking-[0.13em] text-[#9a422b]">
-              Search result {result.rank}
-            </p>
-            <h3 className="mt-2 text-xl font-bold text-[#3d241c] sm:text-2xl">
-              {result.display_name}
-            </h3>
-            <p className="mt-1 text-sm font-semibold leading-6 text-stone-600">
-              {result.headline}
-            </p>
-
-            <div className="mt-4 grid gap-2 text-sm text-stone-600">
-              <span className="inline-flex items-center gap-2">
-                <MapPin className="size-4 shrink-0 text-stone-400" aria-hidden="true" />
-                {result.location}
-              </span>
-              <span className="inline-flex items-center gap-2">
-                <Clock3 className="size-4 shrink-0 text-stone-400" aria-hidden="true" />
-                {result.years_experience} {result.years_experience === 1 ? 'year' : 'years'} of documented experience
-              </span>
-            </div>
-
-            <p className="mt-5 text-xs font-bold uppercase tracking-[0.12em] text-stone-500">Profile skills</p>
-            <div className="mt-2 flex flex-wrap gap-2" aria-label="Profile skills">
-              {result.skills.map(skill => (
-                <Badge
-                  key={skill}
-                  variant="secondary"
-                  className="border border-[#e4d8cb] bg-[#faf6ef] px-2.5 py-1 text-xs font-medium text-stone-700"
-                >
-                  {skill}
-                </Badge>
-              ))}
-            </div>
-          </div>
-
-          <div className="border-t border-[#e7ded3] bg-[#fdfaf5] p-5 sm:p-6 md:border-l md:border-t-0">
-            <div className="flex items-start gap-3">
-              <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#eaf2e6] text-[#466447]">
-                <Quote className="size-4" aria-hidden="true" />
-              </span>
-              <div>
-                <p className="font-bold text-[#3d241c]">Why this result appeared</p>
-                <p className="mt-0.5 text-xs text-stone-500">Exact lines from this fictional résumé</p>
+          <div className="relative p-5 sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <p className="cocoa-label">Search result {result.rank}</p>
+              <div
+                className="relative"
+                onKeyDown={event => { if (event.key === 'Escape') setScoreOpen(false); }}
+                onBlur={event => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) setScoreOpen(false);
+                }}
+              >
+                <ScoreRing
+                  score={result.query_match_score}
+                  tone="query"
+                  ariaLabel={`Query match: ${result.query_match_score} out of 100. Click to learn how it was scored.`}
+                  expanded={scoreOpen}
+                  controls={scorePopoverId}
+                  onScoreClick={() => setScoreOpen(true)}
+                  onScoreFocus={() => setScoreOpen(true)}
+                />
+                {scoreOpen ? (
+                  <div id={scorePopoverId} role="tooltip" className="absolute right-0 top-[calc(100%+10px)] z-30 w-60 rounded-[var(--radius-md)] bg-[var(--cocoa-900)] p-3 text-xs leading-5 text-white shadow-[var(--shadow-modal)]">
+                    <span aria-hidden="true" className="absolute -top-1.5 right-5 size-3 rotate-45 bg-[var(--cocoa-900)]" />
+                    <strong className="block text-sm">Query match</strong>
+                    This score is recomputed from the cited résumé evidence for each search. It measures relevance—not candidate quality or hireability.
+                  </div>
+                ) : null}
               </div>
             </div>
 
+            <div className="mt-4 flex items-center gap-3">
+              <CandidateAvatar name={result.display_name} />
+              <div className="min-w-0">
+                <h3 className="font-display text-xl font-semibold text-[var(--cocoa-900)]">{result.display_name}</h3>
+                <p className="mt-0.5 text-sm font-semibold text-[var(--cocoa-700)]">{result.headline}</p>
+              </div>
+            </div>
+
+            <dl className="mt-5 grid gap-2 text-sm text-[var(--cocoa-600)]">
+              <div className="flex items-center gap-2"><MapPin className="size-4" aria-hidden="true" /><dt className="sr-only">Location</dt><dd>{result.location}</dd></div>
+              <div className="flex items-center gap-2"><Sparkles className="size-4" aria-hidden="true" /><dt className="sr-only">Experience</dt><dd>{result.years_experience} {result.years_experience === 1 ? 'year' : 'years'} documented</dd></div>
+            </dl>
+
+            <p className="mt-5 text-xs font-semibold text-[var(--cocoa-700)]">Profile skills</p>
+            <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Profile skills">
+              {result.skills.map(skill => (
+                <span key={skill} className="rounded-[var(--radius-sm)] bg-[var(--cocoa-100)] px-2.5 py-1 text-[11px] font-medium text-[var(--cocoa-700)]">{skill}</span>
+              ))}
+            </div>
+
+            <div className="mt-5 rounded-[var(--radius-md)] bg-[var(--cocoa-50)] p-3">
+              <p className="flex items-center gap-2 text-xs font-semibold text-[var(--cocoa-700)]"><ShieldCheck className="size-4" aria-hidden="true" /> Query match: {result.query_match_score}/100</p>
+              <p className="mt-1 text-xs leading-5 text-[var(--cocoa-600)]">Evidence relevance only—never a fit score or hiring recommendation.</p>
+              {debugMode ? <p className="mt-2 font-mono text-[10px] text-[var(--cocoa-500)]">similarity={result.weighted_evidence_similarity}</p> : null}
+            </div>
+          </div>
+
+          <div className="border-t border-[var(--cocoa-100)] bg-[var(--cocoa-50)] p-5 sm:p-6 md:border-l md:border-t-0">
+            <div className="flex items-start gap-3">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-white text-[var(--cocoa-700)] shadow-sm"><Quote className="size-4" aria-hidden="true" /></span>
+              <div>
+                <p className="font-display text-lg font-semibold text-[var(--cocoa-800)]">Why this result appeared</p>
+                <p className="mt-0.5 text-xs text-[var(--cocoa-600)]">Quoted evidence selected for this search</p>
+              </div>
+            </div>
             <div className="mt-4 space-y-3">
               {result.citations.map(citation => (
-                <figure
-                  key={citation.citation_id}
-                  id={citation.citation_id}
-                  className="rounded-xl border border-[#e5dbcf] bg-white p-4"
-                >
-                  <blockquote className="text-sm leading-6 text-stone-700">
-                    “{citation.exact_quote}”
-                  </blockquote>
-                  <figcaption className="mt-3 flex items-center gap-1.5 border-t border-stone-100 pt-3 text-xs leading-5 text-stone-500">
-                    <FileText className="size-3.5 shrink-0" aria-hidden="true" />
-                    {citation.document_label} · {citation.location} · [{citation.citation_id}]
+                <figure key={citation.citation_id} id={citation.citation_id} className="rounded-[var(--radius-md)] border border-[var(--cocoa-100)] bg-white p-4">
+                  <blockquote className="text-sm leading-6 text-[var(--cocoa-800)]">“{citation.exact_quote}”</blockquote>
+                  <figcaption className="mt-3 flex items-center gap-1.5 border-t border-[var(--cocoa-100)] pt-3 text-xs text-[var(--cocoa-600)]">
+                    <FileText className="size-3.5" aria-hidden="true" /> Résumé evidence · {citation.location}
                   </figcaption>
                 </figure>
               ))}
             </div>
-
-            <div className="mt-4 rounded-xl border border-[#d9e2d4] bg-[#f2f7ef] p-4">
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-white text-[#466447] shadow-sm">
-                  <ListChecks className="size-4" aria-hidden="true" />
-                </span>
-                <div>
-                  <p className="font-bold text-[#304b32]">Manager review guide</p>
-                  <p className="mt-0.5 text-xs leading-5 text-[#5b705c]">
-                    A quick count of what is shown in the résumé evidence above.
-                  </p>
-                </div>
-              </div>
-
-              <dl className="mt-4">
-                <div className="flex items-center gap-3 rounded-lg bg-white px-4 py-3 shadow-sm">
-                  <dt className="order-2 text-sm font-semibold leading-5 text-stone-600">
-                    Quoted résumé {citationCount === 1 ? 'example' : 'examples'} behind this result
-                  </dt>
-                  <dd className="order-1 text-3xl font-bold text-[#3d241c]">{citationCount}</dd>
-                </div>
-              </dl>
-
-              <p className="mt-4 text-xs font-bold uppercase tracking-[0.1em] text-[#4b654d]">
-                Topics mentioned in the quoted sections
-              </p>
-              <div className="mt-2 flex flex-wrap gap-2" aria-label="Job-related topics mentioned in the quoted résumé examples">
-                {evidenceTopics.map(topic => (
-                  <span key={topic} className="rounded-full border border-[#d5e1d0] bg-white px-2.5 py-1 text-xs font-medium text-[#39583a]">
-                    {topic}
-                  </span>
-                ))}
-              </div>
-              <p className="mt-3 text-xs leading-5 text-[#5b705c]">
-                This guide organizes what to review; it does not grade the person. Compare every applicant against the same job requirements.
-              </p>
+            <div className="mt-4 flex flex-wrap gap-2" aria-label="Evidence topics">
+              {result.evidence_topics.map(topic => <span key={topic} className="rounded-full border border-[var(--cocoa-200)] bg-white px-2.5 py-1 text-xs font-medium text-[var(--cocoa-700)]">{topic}</span>)}
             </div>
           </div>
         </div>
@@ -175,7 +137,7 @@ function ResultCard({ result }: { result: DemoSearchResult }) {
   );
 }
 
-export function RecruiterSemanticSearch() {
+export function RecruiterSemanticSearch({ debugMode = false }: { debugMode?: boolean }) {
   const [query, setQuery] = useState(DEFAULT_QUERY);
   const [state, setState] = useState<SearchViewState>(INITIAL_STATE);
   const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -183,8 +145,7 @@ export function RecruiterSemanticSearch() {
 
   const executeSearch = useCallback(async (nextQuery: string, focusResults: boolean) => {
     const normalizedQuery = nextQuery.trim().replace(/\s+/gu, ' ');
-    if (!normalizedQuery) return;
-
+    if (normalizedQuery.length < 3) return;
     requestControllerRef.current?.abort();
     const controller = new AbortController();
     requestControllerRef.current = controller;
@@ -201,45 +162,30 @@ export function RecruiterSemanticSearch() {
       const payload: unknown = await response.json().catch(() => null);
       if (!response.ok) {
         const parsedError = DemoSemanticSearchErrorSchema.safeParse(payload);
-        setState(previous => ({
-          ...previous,
+        setState({
+          response: null,
           loading: false,
-          error: parsedError.success
-            ? parsedError.data.error.message
-            : 'The search service returned an unexpected response.',
+          error: parsedError.success ? parsedError.data.error.message : 'Search returned an unexpected response.',
           requestId: parsedError.success ? parsedError.data.request_id : null,
-        }));
+        });
         return;
       }
-
       const parsed = DemoSemanticSearchResponseSchema.safeParse(payload);
       if (!parsed.success) {
-        setState(previous => ({
-          ...previous,
-          loading: false,
-          error: 'The search response did not pass client-side validation.',
-        }));
+        setState({ response: null, loading: false, error: 'Search results could not be verified.', requestId: null });
         return;
       }
       setState({ response: parsed.data, error: null, requestId: parsed.data.request_id, loading: false });
-      if (focusResults) {
-        requestAnimationFrame(() => resultsHeadingRef.current?.focus());
-      }
+      if (focusResults) requestAnimationFrame(() => resultsHeadingRef.current?.focus());
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
-      setState(previous => ({
-        ...previous,
-        loading: false,
-        error: 'The search service could not be reached. Please try again.',
-      }));
+      setState({ response: null, loading: false, error: 'The search service could not be reached. Please try again.', requestId: null });
     }
   }, []);
 
-  useEffect(() => {
-    return () => requestControllerRef.current?.abort();
-  }, []);
+  useEffect(() => () => requestControllerRef.current?.abort(), []);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     void executeSearch(query, true);
   };
@@ -249,174 +195,83 @@ export function RecruiterSemanticSearch() {
     void executeSearch(example, true);
   };
 
-  const isLiveEmbedding = state.response?.retrieval.mode === 'live_embedding';
-
   return (
-    <section id="search-demo" aria-labelledby="search-demo-title" className="min-w-0 scroll-mt-6">
-      <div className="rounded-2xl border border-[#ded4c8] bg-white p-5 shadow-[0_12px_38px_rgba(76,46,32,0.07)] sm:p-7">
-        <Badge variant="outline" className="border-[#e0d3c4] bg-[#fff9f0] px-3 py-1 text-[#8d3925]">
-          <Sparkles className="size-3.5" aria-hidden="true" />
-          Candidate search
-        </Badge>
-        <h2 id="search-demo-title" className="mt-4 text-2xl font-bold tracking-[-0.025em] text-[#3d241c] sm:text-3xl">
-          What do you need help covering?
-        </h2>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-stone-600 sm:text-base">
-          Write it the way you’d explain it to a manager—include the job, shift, and experience that matter.
-        </p>
-
-        <form role="search" onSubmit={handleSubmit} className="mt-6">
-          <label htmlFor="semantic-candidate-query" className="text-sm font-bold text-stone-800">
-            Describe the person you need
-          </label>
-          <p id="semantic-query-guidance" className="mt-1 text-xs leading-5 text-stone-500">
-            Search by job-related skills, experience, certifications, or schedule. Don’t enter real applicant data. If live search is on, your search words are sent to Google to find related résumé wording.
-          </p>
-          <div className="mt-3 flex flex-col gap-3 sm:flex-row">
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-3.5 top-1/2 size-5 -translate-y-1/2 text-stone-400" aria-hidden="true" />
-              <input
-                id="semantic-candidate-query"
-                value={query}
-                onChange={event => setQuery(event.target.value)}
-                aria-describedby="semantic-query-guidance"
-                autoComplete="off"
-                maxLength={280}
-                placeholder="Example: Weekend opener who can train baristas"
-                className="min-h-12 w-full rounded-xl border border-[#d7cabd] bg-[#fffdf9] py-3 pl-11 pr-4 text-sm text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-[#9f3f27] focus:bg-white focus:ring-4 focus:ring-[#f4ddd5]"
-              />
-            </div>
-
-            <Button
+    <section aria-label="Semantic candidate search" className="min-w-0">
+      <div className="rounded-[var(--radius-lg)] border border-[var(--cocoa-100)] bg-white p-4 shadow-[var(--shadow-card)] sm:p-6">
+        <form role="search" onSubmit={submit}>
+          <label htmlFor="semantic-candidate-query" className="sr-only">Describe the candidate experience you need</label>
+          <div className="relative flex min-h-14 items-center rounded-full border-[1.5px] border-[var(--cocoa-300)] bg-[var(--cream-50)] p-1.5 pl-4 transition focus-within:border-[var(--cocoa-600)] focus-within:shadow-[0_0_0_3px_var(--cocoa-100)]">
+            <Search className="size-5 shrink-0 text-[var(--cocoa-600)]" aria-hidden="true" />
+            <input
+              id="semantic-candidate-query"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              aria-describedby="semantic-query-guidance"
+              autoComplete="off"
+              maxLength={280}
+              placeholder="e.g. Weekend barista who knows latte art"
+              className="min-w-0 flex-1 bg-transparent px-3 py-2 text-sm text-[var(--cocoa-900)] outline-none placeholder:text-[var(--cocoa-500)]"
+            />
+            <button
               type="submit"
               disabled={state.loading || query.trim().length < 3}
-              className="min-h-12 rounded-xl bg-[#8d3925] px-5 font-bold text-white shadow-sm hover:bg-[#712c1d] focus-visible:ring-[#9f3f27]"
+              className="flex min-h-11 shrink-0 items-center gap-2 rounded-full bg-[var(--cocoa-700)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--cocoa-600)] disabled:cursor-not-allowed disabled:opacity-50 sm:px-5"
             >
-              {state.loading ? (
-                <>
-                  <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-                  Searching résumés…
-                </>
-              ) : (
-                <>
-                  Find candidates
-                  <ArrowRight className="size-4" aria-hidden="true" />
-                </>
-              )}
-            </Button>
+              {state.loading ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> : <Search className="size-4" aria-hidden="true" />}
+              <span className="hidden sm:inline">{state.loading ? 'Searching…' : 'Search'}</span>
+              {!state.loading ? <ArrowRight className="hidden size-4 sm:block" aria-hidden="true" /> : null}
+            </button>
           </div>
-
+          <p id="semantic-query-guidance" className="mt-3 text-xs leading-5 text-[var(--cocoa-600)]">Use job-related skills, schedule, and experience. Don’t paste personal contact details.</p>
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-stone-500">Quick examples:</span>
-            {EXAMPLE_QUERIES.map((example, index) => (
-              <button
-                key={example}
-                type="button"
-                onClick={() => chooseExample(example)}
-                disabled={state.loading}
-                aria-label={`Use example query: ${example}`}
-                className="min-h-11 rounded-full border border-[#ded4c8] bg-[#fffdf9] px-3 text-left text-xs font-semibold text-stone-700 transition hover:border-[#b9715c] hover:bg-[#fff4e8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9f3f27] disabled:opacity-50"
-              >
-                {index === 0 ? 'Weekend opener + training' : index === 1 ? 'Early baker + sourdough' : 'Shift lead + inventory'}
+            <span className="text-xs font-semibold text-[var(--cocoa-600)]">Try:</span>
+            {EXAMPLE_QUERIES.map(example => (
+              <button key={example} type="button" onClick={() => chooseExample(example)} disabled={state.loading} className="min-h-9 rounded-full bg-[var(--cocoa-100)] px-3 text-xs font-medium text-[var(--cocoa-700)] hover:bg-[var(--cocoa-200)] disabled:opacity-50">
+                {example}
               </button>
             ))}
           </div>
         </form>
       </div>
 
-      <div className="min-h-7" aria-live="polite" aria-atomic="true">
-        {state.loading && (
-          <p role="status" className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-stone-600">
-            <LoaderCircle className="size-4 animate-spin text-[#8d3925]" aria-hidden="true" />
-            Looking through 24 fictional résumé sections…
-          </p>
-        )}
-        {state.error && (
-          <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-            <p className="font-bold">We couldn’t run that search</p>
-            <p className="mt-1">{state.error}</p>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => { void executeSearch(query, true); }}
-              className="mt-3 min-h-11 border-red-200 bg-white text-red-800 hover:bg-red-100"
-            >
-              <RotateCcw className="size-4" aria-hidden="true" />
-              Try again
-            </Button>
-            {state.requestId && (
-              <details className="mt-3 text-xs">
-                <summary className="cursor-pointer font-semibold">Support reference</summary>
-                <p className="mt-1 font-mono">Request {state.requestId}</p>
-              </details>
-            )}
-          </div>
-        )}
-      </div>
-
-      {!state.response && !state.loading && !state.error && (
-        <div className="mt-2 rounded-2xl border border-dashed border-[#d7cabd] bg-[#fffaf3] p-5" role="note">
-          <p className="font-bold text-[#3d241c]">Ready when you are</p>
-          <p className="mt-1 text-sm leading-6 text-stone-600">
-            Try the prepared weekend-barista search or choose a quick example. A role plus one or two must-haves works well.
-          </p>
+      {state.loading ? (
+        <div role="status" aria-live="polite" className="mt-6 flex min-h-48 flex-col items-center justify-center rounded-[var(--radius-lg)] border border-[var(--cocoa-100)] bg-white text-center">
+          <LoaderCircle className="size-7 animate-spin text-[var(--cocoa-600)]" aria-hidden="true" />
+          <p className="mt-3 font-display text-lg font-semibold text-[var(--cocoa-800)]">Finding the strongest evidence matches…</p>
+          <p className="mt-1 text-xs text-[var(--cocoa-600)]">Each candidate is rescored for this exact query.</p>
         </div>
-      )}
+      ) : null}
 
-      {state.response && (
-        <div className="mt-2" aria-busy={state.loading}>
-          <div className="rounded-2xl border border-[#ded4c8] bg-white p-5 sm:p-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h2
-                  ref={resultsHeadingRef}
-                  tabIndex={-1}
-                  className="text-xl font-bold text-[#3d241c] outline-none focus-visible:ring-2 focus-visible:ring-[#9f3f27] sm:text-2xl"
-                >
-                  {state.response.result_count} résumé matches to review
-                </h2>
-                <p className="mt-1 text-sm text-stone-500">
-                  For “{state.response.query}”
-                </p>
-              </div>
-              <Badge className={isLiveEmbedding
-                ? 'border border-[#cadfc7] bg-[#edf6e9] px-3 py-1.5 text-[#365a38]'
-                : 'border border-[#e7d1a8] bg-[#fff7df] px-3 py-1.5 text-[#76531e]'}
-              >
-                {isLiveEmbedding ? <CheckCircle2 className="size-3.5" aria-hidden="true" /> : <ShieldCheck className="size-3.5" aria-hidden="true" />}
-                {isLiveEmbedding ? 'Google-powered matching' : 'Built-in demo matching'}
-              </Badge>
+      {state.error ? (
+        <div role="alert" className="mt-6 rounded-[var(--radius-lg)] border border-red-200 bg-red-50 p-5 text-red-900">
+          <p className="font-semibold">Search needs another try</p>
+          <p className="mt-1 text-sm">{state.error}</p>
+          <button type="button" onClick={() => void executeSearch(query, true)} className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-[var(--radius-md)] border border-red-300 bg-white px-4 text-sm font-semibold"><RotateCcw className="size-4" aria-hidden="true" /> Try again</button>
+          {debugMode && state.requestId ? <p className="mt-2 font-mono text-[10px]">request {state.requestId}</p> : null}
+        </div>
+      ) : null}
+
+      {state.response ? (
+        <div className="mt-8">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="cocoa-label">{state.response.result_count} evidence matches</p>
+              <h2 ref={resultsHeadingRef} tabIndex={-1} className="mt-1 font-display text-2xl font-semibold text-[var(--cocoa-900)]">Best matches for “{state.response.query}”</h2>
             </div>
-
-            <div className="mt-4 rounded-xl border border-[#ead9b7] bg-[#fff8e8] px-4 py-3 text-sm leading-6 text-[#674b20]" role="note">
-              The list puts the closest résumé wording first. It does not grade applicants or recommend who to hire.
-            </div>
-            <p className="mt-3 flex items-start gap-2 text-sm leading-6 text-stone-600">
-              <ShieldCheck className="mt-1 size-4 shrink-0 text-[#466447]" aria-hidden="true" />
-              Your check: read the quoted lines and verify the same job-related requirements with every applicant.
-            </p>
-
-            <details className="group mt-4 border-t border-stone-100 pt-3 text-xs text-stone-500">
-              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#9f3f27]">
-                Before you review
-                <span className="text-base font-normal text-stone-400 transition group-open:rotate-45" aria-hidden="true">+</span>
-              </summary>
-              <ul className="list-disc space-y-1.5 pb-2 pl-5 leading-5" aria-label="Important notes about these search results">
-                {state.response.warnings.map(warning => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            </details>
-
+            <p className="max-w-sm text-xs leading-5 text-[var(--cocoa-600)]">Query match is rescored on the backend for this search. It is not a fit score or hiring recommendation.</p>
           </div>
-
-          <ol className="mt-5 grid gap-4" aria-label="Search results for fictional applicants">
-            {state.response.results.map(result => (
-              <ResultCard key={result.synthetic_candidate_ref} result={result} />
-            ))}
+          <ol className="mt-5 grid gap-5" aria-label="Smart Search results">
+            {state.response.results.map(result => <ResultCard key={result.synthetic_candidate_ref} result={result} debugMode={debugMode} />)}
           </ol>
+          {debugMode ? (
+            <details className="mt-5 rounded-[var(--radius-md)] border border-[var(--cocoa-200)] bg-white p-4 text-xs text-[var(--cocoa-700)]">
+              <summary className="cursor-pointer font-semibold">Debug search details</summary>
+              <p className="mt-2">Mode: {state.response.retrieval.mode} · Model: {state.response.retrieval.model_id} · Request: {state.response.request_id}</p>
+              <ul className="mt-2 list-disc pl-4">{state.response.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>
+            </details>
+          ) : null}
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

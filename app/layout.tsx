@@ -1,28 +1,31 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, Playfair_Display } from "next/font/google";
 import "./globals.css";
 import { DemoToggleWrapper } from "@/components/shared/demo-toggle-wrapper";
 import { ToastProvider } from "@/components/ui/toast";
 import { legacyDemoRoutesEnabled } from "@/lib/http/legacy-demo-route";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-body",
   subsets: ["latin"],
+  weight: ["400", "500", "600"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const playfair = Playfair_Display({
+  variable: "--font-display",
   subsets: ["latin"],
+  weight: ["600", "700"],
 });
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://team-floww.vercel.app"),
-  title: "TeamFlow — Simple Hiring for Small Teams",
-  description: "A bakery-owner hiring workspace that turns a plain-language need into a reviewable candidate list with visible résumé evidence.",
+  title: "TeamFlow — Cocoa Bakery Hiring",
+  description: "Hire the right baristas, bakers, and shift supervisors for Cocoa Bakery in Jersey City with AI-assisted résumé review and candidate tracking.",
+  robots: { index: false, follow: false },
   alternates: { canonical: "/" },
   openGraph: {
-    title: "TeamFlow — Simple Hiring for Small Teams",
-    description: "Describe the shift you need to fill and review the fictional résumé evidence behind every result.",
+    title: "TeamFlow — Cocoa Bakery Hiring",
+    description: "A warm, focused hiring workspace for Cocoa Bakery in Jersey City.",
     type: "website",
     url: "/",
     images: [
@@ -30,14 +33,14 @@ export const metadata: Metadata = {
         url: "/og.png",
         width: 1200,
         height: 630,
-        alt: "TeamFlow — Simple hiring help for small teams — Cocoa Bakery demo workspace",
+        alt: "TeamFlow — Cocoa Bakery hiring workspace",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "TeamFlow — Simple Hiring for Small Teams",
-    description: "Describe the shift you need to fill and review the fictional résumé evidence behind every result.",
+    title: "TeamFlow — Cocoa Bakery Hiring",
+    description: "A warm, focused hiring workspace for Cocoa Bakery in Jersey City.",
     images: ["/og.png"],
   },
 };
@@ -50,7 +53,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
+        className={`${inter.variable} ${playfair.variable} font-sans antialiased`}
       >
         <ToastProvider>
           {children}

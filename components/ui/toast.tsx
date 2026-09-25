@@ -29,10 +29,10 @@ const TOAST_ICONS: Record<ToastType, string> = {
 };
 
 const TOAST_COLORS: Record<ToastType, string> = {
-    success: 'bg-lime-50 border-lime-300 text-lime-800',
-    error: 'bg-red-50 border-red-300 text-red-800',
-    info: 'bg-blue-50 border-blue-300 text-blue-800',
-    warning: 'bg-amber-50 border-amber-300 text-amber-800',
+    success: 'border-[var(--sage-500)] bg-[var(--sage-50)] text-[var(--sage-700)]',
+    error: 'border-destructive/30 bg-destructive/10 text-destructive',
+    info: 'border-[var(--cocoa-200)] bg-[var(--cream-50)] text-[var(--cocoa-800)]',
+    warning: 'border-[var(--cocoa-300)] bg-[var(--cocoa-100)] text-[var(--cocoa-800)]',
 };
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
@@ -72,14 +72,15 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
             {/* Toast Container */}
             <div
                 aria-label="Notifications"
-                className="pointer-events-none fixed inset-x-3 bottom-4 z-[100] flex flex-col gap-2 sm:inset-x-auto sm:bottom-20 sm:right-6 sm:w-full sm:max-w-sm"
+                aria-live="polite"
+                className="pointer-events-none fixed inset-x-3 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-[100] flex flex-col gap-2 sm:inset-x-auto sm:bottom-20 sm:right-6 sm:w-full sm:max-w-sm"
             >
                 {toasts.map(toast => (
                     <div
                         key={toast.id}
                         role={toast.type === 'error' || toast.type === 'warning' ? 'alert' : 'status'}
                         aria-atomic="true"
-                        className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg animate-in slide-in-from-right-5 fade-in duration-300 ${TOAST_COLORS[toast.type]}`}
+                        className={`pointer-events-auto flex items-center gap-3 rounded-[var(--radius-md)] border px-4 py-3 shadow-[var(--shadow-card-hover)] animate-in slide-in-from-right-5 fade-in duration-300 ${TOAST_COLORS[toast.type]}`}
                     >
                         <span aria-hidden="true" className="text-lg flex-shrink-0">{TOAST_ICONS[toast.type]}</span>
                         <p className="text-sm font-medium flex-1">{toast.message}</p>

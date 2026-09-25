@@ -1,4 +1,8 @@
-import type { DemoSearchResult } from '../contracts/demo-semantic-search.ts';
+import {
+  queryConceptCoveragePercent,
+  queryMatchScoreFromSignals,
+  type DemoSearchResult,
+} from '../contracts/demo-semantic-search.ts';
 import {
   SYNTHETIC_CANDIDATE_CORPUS,
   type SyntheticCandidateProfile,
@@ -80,6 +84,37 @@ function normalizedText(value: string): string {
 
 function hasTerm(text: string, term: string): boolean {
   return ` ${text} `.includes(` ${normalizedText(term)} `);
+}
+
+function queryEvidenceConceptSignals(
+  query: string,
+  evidenceParts: readonly string[],
+): { recognized: number; matched: number; coverage: number } {
+  const normalizedQuery = normalizedText(query);
+  const normalizedEvidence = normalizedText(evidenceParts.join(' '));
+  const queryConcepts = CONCEPTS.filter(([, terms]) => (
+    terms.some(term => hasTerm(normalizedQuery, term))
+  ));
+  const matched = queryConcepts.filter(([, terms]) => (
+    terms.some(term => hasTerm(normalizedEvidence, term))
+  )).length;
+  return {
+    recognized: queryConcepts.length,
+    matched,
+    coverage: queryConceptCoveragePercent(matched, queryConcepts.length),
+  };
+}
+
+function visibleResultEvidence(result: Pick<
+  DemoSearchResult,
+  'headline' | 'skills' | 'evidence_topics' | 'citations'
+>): string[] {
+  return [
+    result.headline,
+    ...result.skills,
+    ...result.evidence_topics,
+    ...result.citations.map(citation => citation.exact_quote),
+  ];
 }
 
 function fnv1a(value: string): number {
@@ -220,6 +255,7 @@ function assertSourceVectors(sourceVectors: readonly SourceBlockVector[], dimens
 }
 
 export function rankSyntheticCandidates(
+  query: string,
   queryVector: SearchVector,
   sourceVectors: readonly SourceBlockVector[],
   limit = 5,
@@ -229,7 +265,7 @@ export function rankSyntheticCandidates(
   }
   const vectorsById = assertSourceVectors(sourceVectors, queryVector.length);
 
-  const ranked = CANDIDATE_CORPUS.map(candidate => {
+  const retrieved = CANDIDATE_CORPUS.map(candidate => {
     const sources = candidate.sourceBlocks
       .map(sourceBlock => ({
         sourceBlock,
@@ -250,10 +286,27 @@ export function rankSyntheticCandidates(
   }).sort((left, right) => (
     right.candidateSimilarity - left.candidateSimilarity
     || left.candidate.candidateRef.localeCompare(right.candidate.candidateRef)
-  ));
+  )).slice(0, limit);
 
-  return ranked.slice(0, limit).map(({ candidate, citations, candidateSimilarity }, index) => {
-    const evidenceTopics = [...new Set(citations.flatMap(citation => citation.sourceBlock.topics))].slice(0, 8);
+  const rescored = retrieved.map(({ candidate, citations, candidateSimilarity }) => {
+    const evidenceTopics = [...new Set(
+      citations.flatMap(citation => citation.sourceBlock.topics),
+    )].slice(0, 8);
+    const weightedEvidenceSimilarity = roundSimilarity(candidateSimilarity);
+    const resultCitations = citations.map(({ sourceBlock, similarity }) => ({
+      citation_id: sourceBlock.sourceBlockId.replace('SYN-RES-', 'CIT-SYN-'),
+      source_block_id: sourceBlock.sourceBlockId,
+      document_label: 'Synthetic resume' as const,
+      location: `${sourceBlock.section} · block ${sourceBlock.blockNumber}`,
+      exact_quote: sourceBlock.text,
+      similarity: roundSimilarity(similarity),
+    }));
+    const conceptSignals = queryEvidenceConceptSignals(query, [
+      candidate.headline,
+      ...candidate.skills,
+      ...evidenceTopics,
+      ...resultCitations.map(citation => citation.exact_quote),
+    ]);
     return {
       synthetic_candidate_ref: candidate.candidateRef,
       display_name: candidate.displayName,
@@ -262,18 +315,46 @@ export function rankSyntheticCandidates(
       years_experience: candidate.yearsExperience,
       skills: [...candidate.skills],
       evidence_topics: evidenceTopics,
-      rank: index + 1,
-      weighted_evidence_similarity: roundSimilarity(candidateSimilarity),
-      citations: citations.map(({ sourceBlock, similarity }) => ({
-        citation_id: sourceBlock.sourceBlockId.replace('SYN-RES-', 'CIT-SYN-'),
-        source_block_id: sourceBlock.sourceBlockId,
-        document_label: 'Synthetic resume' as const,
-        location: `${sourceBlock.section} · block ${sourceBlock.blockNumber}`,
-        exact_quote: sourceBlock.text,
-        similarity: roundSimilarity(similarity),
-      })),
+      weighted_evidence_similarity: weightedEvidenceSimilarity,
+      query_concepts_recognized: conceptSignals.recognized,
+      query_concepts_matched: conceptSignals.matched,
+      query_concept_coverage: conceptSignals.coverage,
+      query_match_score: queryMatchScoreFromSignals(
+        weightedEvidenceSimilarity,
+        conceptSignals.coverage,
+        conceptSignals.recognized,
+      ),
+      citations: resultCitations,
     };
-  });
+  }).sort((left, right) => (
+    right.query_match_score - left.query_match_score
+    || right.weighted_evidence_similarity - left.weighted_evidence_similarity
+    || left.synthetic_candidate_ref.localeCompare(right.synthetic_candidate_ref)
+  ));
+
+  return rescored.map((result, index) => ({ ...result, rank: index + 1 }));
+}
+
+export function assertQueryEvidenceRescores(
+  query: string,
+  results: readonly DemoSearchResult[],
+): void {
+  for (const result of results) {
+    const expectedSignals = queryEvidenceConceptSignals(query, visibleResultEvidence(result));
+    const expectedScore = queryMatchScoreFromSignals(
+      result.weighted_evidence_similarity,
+      expectedSignals.coverage,
+      expectedSignals.recognized,
+    );
+    if (
+      result.query_concepts_recognized !== expectedSignals.recognized
+      || result.query_concepts_matched !== expectedSignals.matched
+      || result.query_concept_coverage !== expectedSignals.coverage
+      || result.query_match_score !== expectedScore
+    ) {
+      throw new Error('semantic_search_query_rescore_invalid');
+    }
+  }
 }
 
 export function assertLiteralSourceCitations(results: readonly DemoSearchResult[]): void {

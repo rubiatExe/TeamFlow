@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import {
   DemoSemanticSearchResponseSchema,
+  queryConceptCoveragePercent,
+  queryMatchScoreFromSignals,
   type DemoSearchResult,
 } from '../../lib/contracts/demo-semantic-search.ts';
 import {
@@ -86,15 +88,90 @@ test('deterministic semantic fallback ranks the three example intents as expecte
   ] as const;
 
   for (const [query, expectedFirst] of examples) {
-    const results = rankSyntheticCandidates(createConceptVector(query), sourceVectors);
+    const results = rankSyntheticCandidates(query, createConceptVector(query), sourceVectors);
     assert.equal(results.length, 5);
     assert.equal(results[0].display_name, expectedFirst);
     assert.deepEqual(results.map(result => result.rank), [1, 2, 3, 4, 5]);
-    assert.ok(
-      results[0].weighted_evidence_similarity
-        >= results[1].weighted_evidence_similarity,
-    );
+    for (const result of results) {
+      assert.equal(
+        result.query_concept_coverage,
+        queryConceptCoveragePercent(
+          result.query_concepts_matched,
+          result.query_concepts_recognized,
+        ),
+      );
+      assert.equal(
+        result.query_match_score,
+        queryMatchScoreFromSignals(
+          result.weighted_evidence_similarity,
+          result.query_concept_coverage,
+          result.query_concepts_recognized,
+        ),
+      );
+      assert.equal(Number.isInteger(result.query_match_score), true);
+      assert.ok(result.query_match_score >= 0 && result.query_match_score <= 100);
+    }
+    for (let index = 1; index < results.length; index += 1) {
+      assert.ok(results[index - 1].query_match_score >= results[index].query_match_score);
+    }
   }
+});
+
+test('deterministic fallback recomputes a stable evidence score for each query', () => {
+  const sourceVectors = createFallbackSourceVectors();
+  const baristaQuery = 'Barista who can train new team members and open on weekends';
+  const bakerQuery = 'Early-morning baker experienced in sourdough and recipe scaling';
+
+  const firstBaristaRun = rankSyntheticCandidates(
+    baristaQuery,
+    createConceptVector(baristaQuery),
+    sourceVectors,
+  );
+  const secondBaristaRun = rankSyntheticCandidates(
+    baristaQuery,
+    createConceptVector(baristaQuery),
+    sourceVectors,
+  );
+  const bakerRun = rankSyntheticCandidates(
+    bakerQuery,
+    createConceptVector(bakerQuery),
+    sourceVectors,
+  );
+
+  assert.deepEqual(secondBaristaRun, firstBaristaRun);
+  const baristaMaya = firstBaristaRun.find(
+    result => result.synthetic_candidate_ref === 'SYN-CAND-001',
+  );
+  const bakerMaya = bakerRun.find(
+    result => result.synthetic_candidate_ref === 'SYN-CAND-001',
+  );
+  assert.ok(baristaMaya);
+  assert.ok(bakerMaya);
+  assert.equal(bakerRun[0].display_name, 'Priya S.');
+  assert.equal(bakerRun[0].query_concepts_recognized, 4);
+  assert.equal(bakerRun[0].query_concepts_matched, 3);
+  assert.equal(bakerRun[0].query_concept_coverage, 75);
+  assert.equal(bakerRun[0].query_match_score, 66);
+  assert.notEqual(baristaMaya.query_match_score, bakerMaya.query_match_score);
+});
+
+test('query evidence coverage reranks only after retrieval', () => {
+  const query = 'barista inventory';
+  const results = rankSyntheticCandidates(
+    query,
+    createConceptVector(query),
+    createFallbackSourceVectors(),
+  );
+
+  const maya = results.find(result => result.synthetic_candidate_ref === 'SYN-CAND-001');
+  const amina = results.find(result => result.synthetic_candidate_ref === 'SYN-CAND-008');
+  assert.ok(maya);
+  assert.ok(amina);
+  assert.ok(amina.weighted_evidence_similarity > maya.weighted_evidence_similarity);
+  assert.equal(maya.query_concept_coverage, 100);
+  assert.equal(amina.query_concept_coverage, 50);
+  assert.ok(maya.query_match_score > amina.query_match_score);
+  assert.ok(maya.rank < amina.rank);
 });
 
 test('every returned citation is a literal canonical source block', () => {
@@ -104,6 +181,7 @@ test('every returned citation is a literal canonical source block', () => {
     }
   }
   const results = rankSyntheticCandidates(
+    'barista trainer for weekend opening shifts',
     createConceptVector('barista trainer for weekend opening shifts'),
     createFallbackSourceVectors(),
   );
@@ -117,7 +195,7 @@ test('every returned citation is a literal canonical source block', () => {
   );
 });
 
-test('search response labels provider fallback and never emits a hiring score or decision', async () => {
+test('search response labels provider fallback and emits relevance, never a hiring score or decision', async () => {
   let clock = 1_000;
   const response = await searchSyntheticCandidates(
     'barista trainer with weekend opening availability',
@@ -138,11 +216,32 @@ test('search response labels provider fallback and never emits a hiring score or
   assert.equal(response.retrieval.model_id, 'teamflow-concept-vector-v1');
   assert.equal(response.retrieval.threshold_applied, false);
   assert.equal(response.retrieval.candidate_aggregation, 'top_two_blocks_75_25');
+  assert.deepEqual(response.scoring, {
+    method: 'query_evidence_rescore_v1',
+    evidence_scope: 'returned_profile_and_citations',
+    rerank_scope: 'retrieval_top_5',
+    retrieval_weight_percent: 35,
+    concept_coverage_weight_percent: 65,
+    no_recognized_concepts: 'retrieval_only',
+    calibrated: false,
+    threshold_applied: false,
+  });
   assert.equal(response.decision_status, 'no_hiring_decision');
   assert.equal(response.results[0].display_name, 'Maya T.');
   assert.ok(response.warnings.some(warning => warning.includes('built-in matching')));
+  assert.ok(response.warnings.some(warning => (
+    warning.includes('uncalibrated') && warning.includes('not a fit score')
+  )));
   assert.doesNotMatch(response.warnings.join(' '), /cosine|vector|embedding|similarity/iu);
   for (const result of response.results) {
+    assert.equal(
+      result.query_match_score,
+      queryMatchScoreFromSignals(
+        result.weighted_evidence_similarity,
+        result.query_concept_coverage,
+        result.query_concepts_recognized,
+      ),
+    );
     assert.equal('fit_score' in result, false);
     assert.equal('recommendation' in result, false);
   }
@@ -174,6 +273,16 @@ test('search response reports live Gemini mode only after valid 768d vectors', a
   assert.equal(response.retrieval.model_id, 'gemini-embedding-001');
   assert.equal(response.retrieval.dimensions, 768);
   assert.equal(response.results[0].display_name, 'Priya S.');
+  for (const result of response.results) {
+    assert.equal(
+      result.query_match_score,
+      queryMatchScoreFromSignals(
+        result.weighted_evidence_similarity,
+        result.query_concept_coverage,
+        result.query_concepts_recognized,
+      ),
+    );
+  }
 });
 
 test('Gemini adapter sends separate retrieval tasks, bounds output, and disables trace propagation', async t => {
@@ -243,7 +352,57 @@ test('public route enforces JSON, safety, rate limiting, and response correlatio
   });
   assert.equal(accepted.status, 200);
   assert.equal(accepted.headers.get('cache-control'), 'no-store, max-age=0');
-  assert.equal((await accepted.json()).request_id, REQUEST_ID);
+  const acceptedBody = await accepted.json();
+  assert.equal(acceptedBody.request_id, REQUEST_ID);
+  assert.equal(Number.isInteger(acceptedBody.results[0].query_match_score), true);
+
+  const forgedScore = await handleDemoSemanticSearchRequest(request('weekend barista trainer'), {
+    requestIdFactory: () => REQUEST_ID,
+    rateLimit: () => ({ allowed: true, retryAfterSeconds: 0 }),
+    logError: () => undefined,
+    search: async (query, requestId) => {
+      const response = await search(query, requestId);
+      return {
+        ...response,
+        results: response.results.map((result, index) => index === 0
+          ? {
+              ...result,
+              query_match_score: result.query_match_score === 100
+                ? 99
+                : result.query_match_score + 1,
+            }
+          : result),
+      };
+    },
+  });
+  assert.equal(forgedScore.status, 502);
+  assert.equal((await forgedScore.json()).error.code, 'search_unavailable');
+
+  const forgedEvidenceSignals = await handleDemoSemanticSearchRequest(
+    request('weekend barista trainer'),
+    {
+      requestIdFactory: () => REQUEST_ID,
+      rateLimit: () => ({ allowed: true, retryAfterSeconds: 0 }),
+      logError: () => undefined,
+      search: async (query, requestId) => {
+        const response = await search(query, requestId);
+        return {
+          ...response,
+          results: response.results.map((result, index) => index === 0
+            ? {
+                ...result,
+                // This remains arithmetically valid (2/2 = 100 and the score is
+                // unchanged), but it is false for the query and returned evidence.
+                query_concepts_recognized: 2,
+                query_concepts_matched: 2,
+              }
+            : result),
+        };
+      },
+    },
+  );
+  assert.equal(forgedEvidenceSignals.status, 502);
+  assert.equal((await forgedEvidenceSignals.json()).error.code, 'search_unavailable');
 
   const unsafe = await handleDemoSemanticSearchRequest(request('young barista'), {
     requestIdFactory: () => REQUEST_ID,

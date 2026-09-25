@@ -7,8 +7,10 @@ TeamFlow transforms the hourly hiring process with AI-powered resume parsing, in
 **Live bakery-owner demo:** [team-floww.vercel.app](https://team-floww.vercel.app/) — a
 read-only hiring workspace for the fictional Cocoa Bakery. An owner can describe an open
 shift in everyday language and review an ordered list drawn from eight fictional profiles.
-Every result includes literal citations to its synthetic résumé blocks, the active
-retrieval mode is visible, and no hiring decision is automated. See the
+Every result includes literal citations to its synthetic résumé blocks. The backend
+retrieves five profiles, then reranks them with a query-specific 0–100 blend of visible
+job-concept coverage and retrieval relevance. The score is uncalibrated relevance, not
+candidate fitness; the active retrieval mode is visible, and no hiring decision is automated. See the
 [`public semantic-search demo guide`](docs/public-semantic-search-demo.md) for the exact
 runtime and evidence boundary.
 
@@ -33,7 +35,7 @@ TeamFlow uses AI to solve this:
 
 | Feature | How It Helps |
 |---------|-------------|
-| 🔎 **Evidence-Grounded Search Demo** | A manager describes job-related needs in natural language and receives ranked fictional profiles with literal source citations |
+| 🔎 **Evidence-Grounded Search Demo** | A manager describes job-related needs and receives five fictional profiles reranked by a backend evidence score, with literal citations and no fit score or hiring recommendation |
 | 🧠 **Smart Resume Parsing** | Drop a PDF and get validated structured data plus a fit score |
 | 📊 **AI Fit Scoring** | Gemini analyzes each candidate against role-specific requirements |
 | 📱 **Magic Link Invite Demo** | Prototype invite and candidate flow; production token verification and route authorization remain open |

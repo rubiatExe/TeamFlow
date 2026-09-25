@@ -126,10 +126,10 @@ export const CAFE_ROLES: CafeRole[] = [
         },
     },
 
-    // ── Shift Lead ───────────────────────────────────────────────────────────
+    // ── Shift Supervisor ─────────────────────────────────────────────────────
     {
         id: 'shift_lead',
-        title: 'Shift Lead',
+        title: 'Shift Supervisor',
         emoji: '👑',
         description: 'Supervise the floor team during shifts, handle cash-out, resolve customer escalations, and ensure food safety and cleanliness standards are met. Serves as acting manager when the owner is away.',
         wageRange: { min: 18, max: 22 },
@@ -272,6 +272,79 @@ export const CAFE_ROLES: CafeRole[] = [
                 },
                 {
                     id: 'lm_pride', question: 'Tell us about a dish or shift you are most proud of.',
+                    type: 'text', minChars: 0, maxChars: 400
+                },
+            ],
+        },
+    },
+
+    // ── Prep Cook ────────────────────────────────────────────────────────────
+    {
+        id: 'prep_cook',
+        title: 'Prep Cook',
+        emoji: '🥕',
+        description: 'Back-of-house prep cook responsible for accurate ingredient preparation, safe food handling, labeling, stocking, and keeping the kitchen ready for every service.',
+        wageRange: { min: 15, max: 18 },
+        dealbreakers: [
+            'Weekend availability required',
+            'Valid work authorization',
+            "Food Handler's Permit required",
+        ],
+        essentialSkills: [
+            { id: 'knife_skills', label: '🔪 Knife Skills' },
+            { id: 'food_prep', label: '🥕 Ingredient Prep' },
+            { id: 'food_safety', label: '🛡️ Food Safety' },
+            { id: 'portioning', label: '⚖️ Portioning' },
+            { id: 'labeling_rotation', label: '🏷️ Labeling & Rotation' },
+            { id: 'cleaning_sanitation', label: '🧹 Cleaning/Sanitation' },
+        ],
+        niceToHaveSkills: [
+            { id: 'batch_cooking', label: '🍲 Batch Cooking' },
+            { id: 'baking_basics', label: '🍞 Baking Basics' },
+            { id: 'inventory', label: '📦 Inventory/Receiving' },
+            { id: 'allergen_awareness', label: '🌾 Allergen Awareness' },
+            { id: 'recipe_scaling', label: '📐 Recipe Scaling' },
+            { id: 'bilingual', label: '🌍 Bilingual' },
+        ],
+        certifications: [
+            { id: 'food_handler', label: "🍽️ Food Handler's Permit" },
+            { id: 'servsafe', label: '✅ ServSafe Certified' },
+            { id: 'first_aid', label: '🩹 First Aid/CPR' },
+        ],
+        superpowers: [
+            { id: 'organized', emoji: '📋', label: 'Mise en place master', desc: 'My station is stocked, labeled, and ready before service starts' },
+            { id: 'precise', emoji: '🎯', label: 'Precise', desc: 'Every cut and portion matches the recipe' },
+            { id: 'fast', emoji: '⚡', label: 'Efficient', desc: 'I move quickly without sacrificing safety or quality' },
+            { id: 'clean', emoji: '✨', label: 'Clean as you go', desc: 'My prep area stays safe and organized all shift' },
+            { id: 'reliable', emoji: '🧱', label: 'Dependable', desc: 'The kitchen can count on me to have prep ready on time' },
+            { id: 'team_player', emoji: '🤝', label: 'Team player', desc: 'I notice what the line needs and jump in' },
+        ],
+        questions: {
+            knockout: [
+                { id: 'pck_auth', question: 'Are you legally authorized to work in the US?', type: 'boolean', failValue: 'no' },
+                { id: 'pck_weekend', question: 'Can you work at least one weekend day per week?', type: 'boolean', failValue: 'no' },
+            ],
+            skills: [
+                {
+                    id: 'pcs_knife', question: 'How would you rate your professional knife and vegetable-prep experience?',
+                    type: 'select', options: ['No professional experience', 'Beginner — basic cuts', 'Intermediate — consistent production prep', 'Advanced — fast, precise, and able to train others']
+                },
+                {
+                    id: 'pcs_rotation', question: 'Walk us through how you label, date, store, and rotate a finished prep batch.',
+                    type: 'text', minChars: 50, maxChars: 400
+                },
+                {
+                    id: 'pcs_priority', question: 'Service starts in 45 minutes and three prep items are unfinished. How do you prioritize the work?',
+                    type: 'text', minChars: 50, maxChars: 400
+                },
+            ],
+            motivation: [
+                {
+                    id: 'pcm_why', question: 'Why do you want to work on the prep team at our bakery?',
+                    type: 'text', minChars: 50, maxChars: 500
+                },
+                {
+                    id: 'pcm_pride', question: 'Tell us about a kitchen task or prep system you improved.',
                     type: 'text', minChars: 0, maxChars: 400
                 },
             ],

@@ -1,5 +1,7 @@
 import {
   DemoSemanticSearchResponseSchema,
+  QUERY_MATCH_CONCEPT_COVERAGE_WEIGHT_PERCENT,
+  QUERY_MATCH_RETRIEVAL_WEIGHT_PERCENT,
   type DemoSemanticSearchResponse,
 } from '../contracts/demo-semantic-search.ts';
 import { SYNTHETIC_CANDIDATE_CORPUS } from '../domain/demo-semantic-search-data.ts';
@@ -13,6 +15,7 @@ import {
 import {
   CONCEPT_VECTOR_DIMENSIONS,
   assertLiteralSourceCitations,
+  assertQueryEvidenceRescores,
   createConceptVector,
   createFallbackSourceVectors,
   inspectDemoSearchQuery,
@@ -75,6 +78,7 @@ export async function searchSyntheticCandidates(
         }
         const vectors = await (dependencies.getGeminiVectors ?? getGeminiSemanticVectors)(inspected.query);
         results = rankSyntheticCandidates(
+          inspected.query,
           vectors.queryVector,
           vectors.sourceVectors,
           5,
@@ -99,6 +103,7 @@ export async function searchSyntheticCandidates(
           }))();
         }
         results = rankSyntheticCandidates(
+          inspected.query,
           createConceptVector(inspected.query),
           createFallbackSourceVectors(),
           5,
@@ -117,11 +122,22 @@ export async function searchSyntheticCandidates(
       }
 
       assertLiteralSourceCitations(results);
+      assertQueryEvidenceRescores(inspected.query, results);
       const latencyMs = Math.max(0, Math.min(60_000, Math.round(now() - startedAt)));
       return DemoSemanticSearchResponseSchema.parse({
         request_id: requestId,
         query: inspected.query,
         retrieval,
+        scoring: {
+          method: 'query_evidence_rescore_v1',
+          evidence_scope: 'returned_profile_and_citations',
+          rerank_scope: 'retrieval_top_5',
+          retrieval_weight_percent: QUERY_MATCH_RETRIEVAL_WEIGHT_PERCENT,
+          concept_coverage_weight_percent: QUERY_MATCH_CONCEPT_COVERAGE_WEIGHT_PERCENT,
+          no_recognized_concepts: 'retrieval_only',
+          calibrated: false,
+          threshold_applied: false,
+        },
         results,
         result_count: results.length,
         corpus_size: SYNTHETIC_CANDIDATE_CORPUS.length,
@@ -130,8 +146,9 @@ export async function searchSyntheticCandidates(
         decision_status: 'no_hiring_decision',
         warnings: [
           'This demo searches only fictional résumé profiles; no real applicants or contact details are included.',
-          'The list order only compares wording in the quoted résumé sections. It does not measure applicant quality or recommend who to hire.',
+          'The list order compares only job-related wording in the returned fictional profile and résumé quotations. It does not measure applicant quality or recommend who to hire.',
           'TeamFlow does not accept or reject anyone, and it does not apply a pass line.',
+          'Query match is an uncalibrated blend of visible job-concept coverage and retrieval relevance. It is not a fit score or hiring recommendation.',
           ...(providerFallback
             ? [liveEmbeddingDisabled
               ? 'Google-powered matching is off for this demo, so this search used TeamFlow’s built-in matching.'

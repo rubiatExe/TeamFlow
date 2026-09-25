@@ -55,7 +55,7 @@ function assertNamedServerRenderedControls(html) {
 }
 
 if (mode === 'development') {
-  test('public bakery-owner search workspace renders its accessible synthetic shell', async () => {
+  test('public Cocoa dashboard renders its accessible hiring workspace', async () => {
     const response = await request('/');
     const html = await response.text();
 
@@ -64,11 +64,10 @@ if (mode === 'development') {
     assert.match(html, /<html[^>]*lang="en"/i);
     assertSingleMain(html);
     assert.match(html, /Cocoa Bakery/);
-    assert.match(html, /Demo uses 8 fictional profiles/);
-    assert.match(html, /Read-only search/);
-    assert.match(html, /What do you need help covering\?/);
-    assert.match(html, /Find candidates/);
-    assert.match(html, /automated hiring decisions/i);
+    assert.match(html, /Hiring for Barista/);
+    assert.match(html, /Candidate hiring pipeline/);
+    assert.match(html, /Upload Resumes/);
+    assert.match(html, /Smart Search/);
     assertNamedServerRenderedControls(html);
   });
 
@@ -91,21 +90,29 @@ if (mode === 'development') {
     assertSecurityHeaders(publicResponse);
     assertSingleMain(html);
     assert.match(html, /Cocoa Bakery/);
-    assert.match(html, /Demo uses 8 fictional profiles/);
-    assert.match(html, /Read-only search/);
-    assert.match(html, /What do you need help covering\?/);
+    assert.match(html, /Hiring for Barista/);
+    assert.match(html, /Candidate hiring pipeline/);
+    assert.match(html, /Upload Resumes/);
+    assert.match(html, /Smart Search/);
 
     const candidateResponse = await request('/apply');
     assert.equal(candidateResponse.status, 404);
     assertSecurityHeaders(candidateResponse);
   });
 
-  test('legacy demo mutations stop at the production route gate', async () => {
-    for (const path of ['/api/application', '/api/invite']) {
+  test('legacy demo data routes stop at the production route gate', async () => {
+    for (const [path, method] of [
+      ['/api/application', 'POST'],
+      ['/api/invite', 'POST'],
+      ['/api/parser', 'POST'],
+      ['/api/candidates', 'GET'],
+      ['/api/candidates?id=demo_1', 'DELETE'],
+      ['/api/square/labor', 'GET'],
+    ]) {
       const response = await request(path, {
-        method: 'POST',
+        method,
         headers: { 'Content-Type': 'application/json' },
-        body: '{}',
+        ...(method === 'POST' ? { body: '{}' } : {}),
       });
       const body = await response.json();
       assert.equal(response.status, 404, path);

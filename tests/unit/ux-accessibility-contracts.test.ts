@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
+import { CAFE_ROLES, getRoleById } from '../../lib/domain/roles.ts';
+
 function source(path: string): string {
   return readFileSync(path, 'utf8');
 }
@@ -57,6 +59,22 @@ test('the local role questionnaire excludes age from automated knockout criteria
   assert.doesNotMatch(roles, /id: '[a-z]+_(?:lift|standing|transport)'/u);
 });
 
+test('the Cocoa Bakery role catalog includes Prep Cook and preserves the Shift Supervisor identity', () => {
+  const roleIds = CAFE_ROLES.map(role => role.id);
+  const prepCook = getRoleById('prep_cook');
+  const shiftSupervisor = getRoleById('shift_lead');
+
+  assert.equal(new Set(roleIds).size, roleIds.length);
+  assert.equal(CAFE_ROLES.length, 6);
+  assert.equal(prepCook?.title, 'Prep Cook');
+  assert.equal(prepCook?.id, 'prep_cook');
+  assert.ok(prepCook?.questions.knockout.length);
+  assert.ok(prepCook?.questions.skills.length);
+  assert.ok(prepCook?.questions.motivation.length);
+  assert.equal(shiftSupervisor?.id, 'shift_lead');
+  assert.equal(shiftSupervisor?.title, 'Shift Supervisor');
+});
+
 test('candidate flow and choice grids retain a reachable single-column mobile layout', () => {
   const applicationFlow = source('components/candidate-application/application-flow.tsx');
   const basicInfo = source('components/candidate-application/basic-info.tsx');
@@ -71,41 +89,50 @@ test('candidate flow and choice grids retain a reachable single-column mobile la
   assert.match(skills, /grid grid-cols-1 gap-2 min-\[390px\]:grid-cols-2/u);
 });
 
-test('manager interactions expose demo provenance and truthful status dialogs', () => {
+test('the Cocoa dashboard keeps public mutations gated and its manager controls accessible', () => {
+  const page = source('app/page.tsx');
   const dashboard = source('components/candidates/manager-dashboard.tsx');
   const personaSettings = source('components/hiring-personas/persona-settings.tsx');
   const dialog = source('components/ui/dialog.tsx');
   const board = source('components/candidates/candidate-board.tsx');
   const card = source('components/candidates/candidate-card.tsx');
+  const scoreRing = source('components/candidates/score-ring.tsx');
+  const onboarding = source('components/ui/onboarding-banner.tsx');
 
-  assert.match(dashboard, /Local demo:/u);
-  assert.match(dashboard, /Do not use them for hiring decisions/u);
+  assert.match(page, /href="#main-content"/u);
+  assert.match(page, /<ManagerDashboard interactiveDemoEnabled=\{legacyDemoRoutesEnabled\(\)\}/u);
+  assert.match(dashboard, /<main id="main-content"/u);
+  assert.match(dashboard, /if \(!interactiveDemoEnabled\) return;/u);
+  assert.match(dashboard, /Invitations are disabled in the public preview/u);
+  assert.match(dashboard, /disabled=\{!interactiveDemoEnabled\}/u);
+  assert.match(dashboard, /debugMode \?/u);
+  assert.match(onboarding, /sample applicants/u);
+  assert.match(onboarding, /aria-label="Dismiss welcome guide"/u);
   assert.match(dashboard, /<Dialog open=/u);
   assert.match(dashboard, /<DialogContent/u);
   assert.match(dashboard, /<DialogTitle/u);
   assert.match(dashboard, /<DialogDescription/u);
-  assert.match(dashboard, /aria-label="Open hiring persona settings"/u);
-  assert.match(dashboard, /sidebarTriggerRef\.current\?\.focus\(\)/u);
-  assert.match(dashboard, /candidateSearchRef\.current\?\.focus\(\)/u);
+  assert.match(dashboard, /mobileSettingsTriggerRef\.current\?\.focus\(\)/u);
   assert.match(dashboard, /hiredReturnFocusRef\.current\?\.focus\(\)/u);
-  assert.match(dashboard, /<caption className="sr-only">/u);
-  assert.match(dashboard, /<th scope="col"/u);
-  assert.match(dashboard, /<th scope="row"/u);
   assert.match(personaSettings, /<Dialog open/u);
   assert.match(personaSettings, /onOpenAutoFocus=/u);
   assert.match(personaSettings, /onCloseAutoFocus=/u);
   assert.match(personaSettings, /returnFocusRef\.current\.focus\(\)/u);
   assert.match(personaSettings, /htmlFor="persona-job-title"/u);
-  assert.match(personaSettings, /aria-label="Close hiring persona settings"/u);
+  assert.match(personaSettings, /aria-label="Close hiring settings"/u);
   assert.match(personaSettings, /aria-pressed=/u);
   assert.match(dialog, /DialogPrimitive\.Content/u);
   assert.match(dialog, /DialogPrimitive\.Overlay/u);
-  assert.match(dashboard, /No onboarding, account creation, scheduling, or calendar action was performed/u);
-  assert.doesNotMatch(dashboard, /Onboarding Complete/u);
-  assert.equal(board.includes('aria-label={`Remove '), true);
-  assert.match(board, /col\.key !== 'invited'/u);
-  assert.match(card, /if \(!res\.ok \|\| !result\?\.success\)/u);
-  assert.match(card, /Send invite by text/u);
+  assert.match(board, /aria-label="Candidate hiring pipeline"/u);
+  assert.match(board, /event\.key !== 'ArrowDown' && event\.key !== 'ArrowUp'/u);
+  assert.match(board, /querySelectorAll<HTMLElement>\('\[data-candidate-card\]'\)/u);
+  assert.match(card, /tabIndex=\{0\}/u);
+  assert.match(card, /event\.key === 'Enter' \|\| event\.key === ' '/u);
+  assert.equal(card.includes('aria-label={`Remove ${candidate.name}`}'), true);
+  assert.match(card, /aria-haspopup="menu"/u);
+  assert.match(card, /role="menuitem"/u);
+  assert.match(scoreRing, /Fit score: \$\{boundedScore\}\. Click to see breakdown\./u);
+  assert.match(scoreRing, /aria-expanded=\{expanded\}/u);
   assert.doesNotMatch(card, /candidateEmail:/u);
 });
 
@@ -118,7 +145,11 @@ test('toasts and file processing status are announced and dismissible by name', 
   assert.match(toast, /min-h-11 min-w-11/u);
   assert.match(dropZone, /Browse files/u);
   assert.match(dropZone, /role="status"/u);
-  assert.match(dropZone, /role="progressbar"/u);
+  assert.match(dropZone, /aria-live="polite"/u);
+  assert.match(dropZone, /aria-label="Choose résumé files"/u);
+  assert.match(dropZone, /Résumé processing is disabled in the public preview/u);
+  assert.match(dropZone, /new FileReader\(\)/u);
+  assert.match(dropZone, /candidateIdFromPayload\(payload\)/u);
 });
 
 test('the global demo switch names its destination and keeps a mobile-size target', () => {
@@ -132,20 +163,17 @@ test('the global demo switch names its destination and keeps a mobile-size targe
   assert.match(demoToggle, /Switch to \{destinationView\}/u);
 });
 
-test('public semantic search exposes visible guidance, ordered results, and literal citations', () => {
+test('the unified dashboard embeds an accessible evidence-led Smart Search', () => {
   const page = source('app/page.tsx');
+  const dashboard = source('components/candidates/manager-dashboard.tsx');
+  const smartSearch = source('components/search/smart-search-tab.tsx');
   const search = source('components/demo/recruiter-semantic-search.tsx');
 
-  assert.match(page, /Cocoa Bakery/u);
-  assert.match(page, /Hiring workspace/u);
-  assert.match(page, /Three easy steps/u);
-  assert.match(page, /Demo uses 8 fictional profiles/u);
-  assert.match(page, /Read-only search/u);
-  assert.match(page, /A hiring manager reviews the résumé evidence/u);
-  assert.match(page, /owns every decision/u);
-  assert.doesNotMatch(page, /Inspect the implementation behind the claims/u);
-  assert.doesNotMatch(page, /About the demo, safety, and technical proof|href="#about-demo"|implementationLinks/u);
-  assert.doesNotMatch(page, /ManagerDashboard/u);
+  assert.match(page, /ManagerDashboard/u);
+  assert.match(page, /Skip to main content/u);
+  assert.match(dashboard, /<SmartSearchTab debugMode=\{debugMode\}/u);
+  assert.match(smartSearch, /<h2 id="smart-search-tab-title"/u);
+  assert.match(smartSearch, /Every match is rescored for that query and backed by quoted résumé evidence/u);
 
   assert.match(search, /<form role="search"/u);
   assert.match(search, /htmlFor="semantic-candidate-query"/u);
@@ -153,22 +181,16 @@ test('public semantic search exposes visible guidance, ordered results, and lite
   assert.match(search, /maxLength=\{280\}/u);
   assert.match(search, /aria-live="polite"/u);
   assert.match(search, /role="alert"/u);
-  assert.match(search, /Find candidates/u);
+  assert.match(search, /Shift supervisor with scheduling/u);
   assert.match(search, /Why this result appeared/u);
-  assert.match(search, /Manager review guide/u);
-  assert.match(search, /Quoted résumé \{citationCount === 1 \? 'example' : 'examples'\} behind this result/u);
-  assert.match(search, /Topics mentioned in the quoted sections/u);
-  assert.match(search, /does not grade the person/u);
-  assert.match(search, /Before you review/u);
+  assert.match(search, /Evidence relevance only—never a fit score or hiring recommendation/u);
+  assert.match(search, /aria-label="Evidence topics"/u);
   assert.match(search, /state\.response\.warnings\.map/u);
-  assert.match(search, /Google-powered matching/u);
-  assert.match(search, /Built-in demo matching/u);
-  assert.match(search, /<ol[\s\S]{0,160}aria-label="Search results for fictional applicants"/u);
+  assert.match(search, /debugMode \? <p[\s\S]{0,160}similarity=/u);
+  assert.match(search, /<ol className="mt-5 grid gap-5" aria-label="Smart Search results"/u);
   assert.match(search, /<blockquote/u);
   assert.match(search, /<figcaption/u);
   assert.match(search, /citation\.citation_id/u);
   assert.match(search, /result\.evidence_topics/u);
-  assert.doesNotMatch(search, /Technical search numbers|weighted_evidence_similarity|citation\.similarity|block similarity|toFixed\(3\)/u);
-  assert.match(search, /min-h-12/u);
   assert.match(search, /sm:flex-row/u);
 });
