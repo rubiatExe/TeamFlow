@@ -15,7 +15,7 @@ This record covers the pending repository changes, including Google Cloud Vision
 | Production container builds | Both services built for Linux ARM64 and Linux amd64 using hash-locked dependencies |
 | Container dependency integrity | `pip check` passed for both services and architectures |
 | Production configuration smoke | Both containers returned health/readiness 200 and rejected unauthenticated requests with 401; hiring version endpoint returned 200 |
-| Web verification | TypeScript, ESLint, integration/model/release contracts, and 252 unit tests passed under Node 22 |
+| Web verification | TypeScript, ESLint, integration/model/release contracts, and 257 unit tests passed under Node 22 |
 | Web production build | Next.js 16.3.8 build and all 11 compiled-style checks passed |
 | HTTP journey checks | 3 development and 5 production checks passed, including sample criteria proposal/approval and cross-origin rejection |
 | Dependency audit | Zero npm vulnerabilities; clean Linux Node 22.23.2/npm 10.9.8 install, adapter regression tests, and audit passed |
@@ -26,11 +26,13 @@ Database tests used disposable PostgreSQL 16 and Supabase PostgreSQL 17.6.1.054 
 
 Container smoke checks used `ENVIRONMENT=production`, synthetic credentials, disabled external networking, and a read-only filesystem. They verify startup, configuration, native dependencies, and HTTP boundaries. They do not establish that live Google credentials, Supabase credentials, or Cloud Run permissions work.
 
-Native Linux ARM64 PDF rendering passed with the production worker resource limits and user ID 10001. Under Docker Rosetta, the amd64 worker's address-space limit caused an emulator `mmap` failure. The amd64 libraries rendered successfully in a diagnostic without that limit; production limits were retained. Native amd64 rendering with the limit still requires CI or a Cloud Run canary. One emulated hiring MCP startup test exceeded its initialization budget during the full run and passed when rerun alone; all 852 tests passed together on native Linux.
+Native Linux ARM64 PDF rendering passed with the production worker resource limits and user ID 10001. Under Docker Rosetta, the amd64 worker's address-space limit caused an emulator `mmap` failure; production limits were retained. Native amd64 verification subsequently passed in [GitHub CI run 38415164313](https://github.com/rubiatExe/TeamFlow/actions/runs/38415164313): 209 document tests, 864 hiring tests (including 12 PostgreSQL cases), 6 migration tests, and both container builds passed. This resolves the local emulator limitation. One emulated hiring MCP startup test exceeded its initialization budget during the local full run and passed when rerun alone; the complete native Linux suites passed.
 
 Verification fixed one packaging issue: the document processor Docker context now excludes its local `.venv/`. The host's shared Python installation had an unrelated OpenTelemetry dependency conflict; clean locked containers passed dependency checks and the complete native Linux suites. A Starlette test-client deprecation warning remains.
 
 The web review fixed stale reviewer requests, premature decision-success messages, stale candidates after an empty refresh, and valid loopback criteria requests rejected by Next.js URL normalization. Browser criteria checks used a synthetic local signing secret and the fictional corpus. Dependency updates keep the full audit gate enabled; the scoped lint adapter's npm metadata warning is documented in [its README](../tooling/eslint-root-glob/README.md).
+
+The first Vercel preview exposed a verifier assumption after the framework upgrade: the adapter emits the deployable homepage and CSS under `.next/output`, while the verifier expected native `.next/server/app/index.html`. The verifier now follows Build Output API manifests and packaged assets, retaining all 11 style checks. Regression fixtures cover native output, prerendered and static adapter output, stale CSS, missing assets, and invalid paths.
 
 ## Reproduce the repository checks
 

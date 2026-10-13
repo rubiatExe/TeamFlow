@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -93,6 +93,80 @@ async function fetchText(url, expectedType) {
   return response.text();
 }
 
+/** @param {string} path */
+async function optionalFile(path) {
+  try {
+    return await readFile(path, 'utf8');
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+/** @param {string} root @param {string} path */
+function containedPath(root, path) {
+  const file = resolve(root, path);
+  const withinRoot = relative(root, file);
+  if (isAbsolute(path) || withinRoot === '..' || withinRoot.startsWith(`..${sep}`)) {
+    throw new Error(`Build artifact escapes its output directory: ${path}`);
+  }
+  return file;
+}
+
+/**
+ * Vercel's Next adapter emits Build Output API v3 under <distDir>/output.
+ * The deployment CLI can subsequently copy that output to .vercel/output.
+ * App prerenders use functions/index.prerender-config.json's fallback; static
+ * pages use the static root or a config.json override for the root pathname.
+ * @param {string} outputRoot
+ */
+async function vercelBuildPage(outputRoot) {
+  const configuration = await optionalFile(resolve(outputRoot, 'config.json'));
+  if (configuration === null) return null;
+  const config = JSON.parse(configuration);
+  if (config.version !== 3) throw new Error(`Unsupported Vercel build output version in ${outputRoot}`);
+  const staticRoot = resolve(outputRoot, 'static');
+  const rootOverrides = Object.entries(config.overrides ?? {}).filter(([, override]) => (
+    override && typeof override === 'object' && 'path' in override
+    && ['', '/', '.', './'].includes(override.path)
+  ));
+  if (rootOverrides.length > 1) throw new Error(`Ambiguous root page overrides in ${outputRoot}`);
+  const staticPage = rootOverrides.length
+    ? containedPath(staticRoot, rootOverrides[0][0])
+    : resolve(staticRoot, 'index.html');
+  const staticHtml = await optionalFile(staticPage);
+  if (staticHtml !== null) return { html: staticHtml, assetRoot: staticRoot, assetPrefix: '/', source: outputRoot };
+  if (rootOverrides.length) throw new Error(`Missing configured root page: ${staticPage}`);
+
+  const functionsRoot = resolve(outputRoot, 'functions');
+  const prerenderConfig = await optionalFile(resolve(functionsRoot, 'index.prerender-config.json'));
+  if (prerenderConfig !== null) {
+    const { fallback } = JSON.parse(prerenderConfig);
+    if (typeof fallback !== 'string' || !fallback.endsWith('.html')) {
+      throw new Error(`The root prerender has no HTML fallback in ${outputRoot}`);
+    }
+    return {
+      html: await readFile(containedPath(functionsRoot, fallback), 'utf8'),
+      assetRoot: staticRoot, assetPrefix: '/', source: outputRoot,
+    };
+  }
+  throw new Error(`No root HTML page or configured prerender fallback in ${outputRoot}`);
+}
+
+/** @param {string} buildRoot */
+async function localBuildPage(buildRoot) {
+  // Prefer the adapter's current deployable output when Next also leaves native
+  // files behind. A present but broken adapter output must fail the check.
+  const adapter = await vercelBuildPage(resolve(buildRoot, 'output'))
+    ?? await vercelBuildPage(buildRoot);
+  if (adapter) return adapter;
+  const html = await optionalFile(resolve(buildRoot, 'server/app/index.html'));
+  if (html !== null) return { html, assetRoot: buildRoot, assetPrefix: '/_next/', source: buildRoot };
+  const deployment = await vercelBuildPage(resolve(dirname(buildRoot), '.vercel/output'));
+  if (deployment) return deployment;
+  throw new Error(`No native or Vercel root HTML output found for ${buildRoot}`);
+}
+
 /** @param {{ baseUrl?: string, buildDirectory?: string }} [options] */
 export async function verifyProductionStyles({ baseUrl, buildDirectory } = {}) {
   const buildRoot = resolve(buildDirectory ?? resolve(repositoryRoot, '.next'));
@@ -100,23 +174,22 @@ export async function verifyProductionStyles({ baseUrl, buildDirectory } = {}) {
   if (!['http:', 'https:'].includes(pageUrl.protocol)) {
     throw new Error('The stylesheet check requires an HTTP(S) URL');
   }
-  const html = baseUrl
-    ? await fetchText(pageUrl, 'text/html')
-    : await readFile(resolve(buildRoot, 'server/app/index.html'), 'utf8');
+  const local = baseUrl ? null : await localBuildPage(buildRoot);
+  const html = local ? local.html : await fetchText(pageUrl, 'text/html');
   const links = stylesheetLinks(html);
   const stylesheets = await Promise.all(links.map(async (href) => {
     const url = new URL(href, pageUrl);
     if (url.origin !== pageUrl.origin || !url.pathname.startsWith('/_next/static/')) {
       throw new Error(`Unexpected application stylesheet location: ${href}`);
     }
-    return baseUrl
-      ? fetchText(url, 'text/css')
-      : readFile(resolve(buildRoot, url.pathname.slice('/_next/'.length)), 'utf8');
+    return local
+      ? readFile(containedPath(local.assetRoot, url.pathname.slice(local.assetPrefix.length)), 'utf8')
+      : fetchText(url, 'text/css');
   }));
   const inlineStyles = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/giu)]
     .map(([, css]) => css);
   const checks = assertProductionStyles(html, [...stylesheets, ...inlineStyles].join('\n'));
-  return { source: baseUrl ?? buildRoot, stylesheets: links.length, checks };
+  return { source: baseUrl ?? local?.source ?? buildRoot, stylesheets: links.length, checks };
 }
 
 async function main() {
