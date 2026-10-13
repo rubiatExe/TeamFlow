@@ -14,8 +14,15 @@ export async function GET(req: Request) {
     const merchantId = searchParams.get('merchant_id') || '00000000-0000-0000-0000-000000000001';
     
     // Call the server-side Supabase function directly
-    const candidates = await loadCandidatesFromSupabase(merchantId);
-    return NextResponse.json(candidates);
+    try {
+        const candidates = await loadCandidatesFromSupabase(merchantId);
+        return NextResponse.json(candidates, { headers: { 'Cache-Control': 'no-store' } });
+    } catch {
+        return NextResponse.json(
+            { error: 'Saved applicants could not be loaded. Please try again.' },
+            { status: 503, headers: { 'Cache-Control': 'no-store' } },
+        );
+    }
 }
 
 export async function DELETE(req: Request) {

@@ -146,7 +146,7 @@ function ResultCard({ result, debugMode }: { result: DemoSearchResult; debugMode
   );
 }
 
-export function RecruiterSemanticSearch({ debugMode = false, roleId, candidateRefs }: DemoSearchScope & { debugMode?: boolean }) {
+export function RecruiterSemanticSearch({ debugMode = false, roleId, candidateRefs, onCriteriaRequest }: DemoSearchScope & { debugMode?: boolean; onCriteriaRequest?: (query: string) => void }) {
   const exampleQueries = (roleId && ROLE_EXAMPLES[roleId]) || EXAMPLE_QUERIES;
   const defaultQuery = !roleId || roleId === 'barista' ? DEFAULT_QUERY : exampleQueries[0];
   const [query, setQuery] = useState(defaultQuery);
@@ -247,6 +247,12 @@ export function RecruiterSemanticSearch({ debugMode = false, roleId, candidateRe
               </button>
             ))}
           </div>
+          {onCriteriaRequest ? (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--cocoa-100)] pt-4">
+              <p className="text-xs text-[var(--cocoa-600)]">Want this request to inform scoring?</p>
+              <button type="button" disabled={query.trim().length < 3 || state.loading} onClick={() => onCriteriaRequest(query)} className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[var(--cocoa-200)] px-4 text-xs font-semibold text-[var(--cocoa-700)] hover:bg-[var(--cocoa-50)] disabled:opacity-50"><Sparkles className="size-4" aria-hidden="true" />Build criteria from this request</button>
+            </div>
+          ) : null}
         </form>
       </div>
 

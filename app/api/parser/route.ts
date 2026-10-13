@@ -187,7 +187,7 @@ export async function POST(req: NextRequest) {
             // scores and analyses are written only by an approved Phase 6 decision.
             summary: 'Awaiting authorized human review',
             source: 'upload',
-            // Document embedding — stored in pgvector vector(768) column
+            // Document embedding — stored in pgvector halfvec(3072) column
             embedding: ocrResult.embedding ?? undefined,
           }),
       );

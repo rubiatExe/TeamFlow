@@ -198,7 +198,7 @@ class ExtractionSummary(FrozenContract):
     document_id: DocumentId
     merchant_id: DatabaseId
     status: ExtractionStatus
-    extraction_method: Literal["pdf_text", "gemini_vision"]
+    extraction_method: Literal["pdf_text", "gemini_vision", "google_cloud_vision"]
     model_id: Annotated[StrictStr, StringConstraints(min_length=1, max_length=200)]
     embedding_available: StrictBool
     mock: Literal[False]
@@ -238,7 +238,7 @@ class StoredDocumentExtraction(FrozenContract):
         tuple[DocumentSourceBlock, ...],
         Field(min_length=1, max_length=512),
     ]
-    extraction_method: Literal["pdf_text", "gemini_vision"]
+    extraction_method: Literal["pdf_text", "gemini_vision", "google_cloud_vision"]
     model_id: Annotated[StrictStr, StringConstraints(min_length=1, max_length=200)]
     embedding_available: StrictBool
     mock: Literal[False]

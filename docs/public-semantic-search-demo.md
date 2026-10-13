@@ -28,7 +28,7 @@ score. That 0–100 number describes relevance to the current query, not candida
    An empty role or filtered board yields no results. Browser-local demo edits persist
    in that browser and do not contact or change real applicants.
 6. Point to the runtime badge:
-   - **Google-powered matching** means this request used `gemini-embedding-001`, 768
+   - **Google-powered matching** means this request used `gemini-embedding-001`, 3072
      dimensions, `RETRIEVAL_QUERY` for the query, and `RETRIEVAL_DOCUMENT` for the
      source blocks.
    - **Built-in demo matching** means Google-powered matching was unavailable or disabled

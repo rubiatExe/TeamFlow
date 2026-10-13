@@ -36,16 +36,29 @@ export function Topbar({ selectedRoleId, personas, publicDemo = false, onRoleSel
   }, [roleMenuOpen]);
 
   return (
-    <header className="topbar-enter sticky top-0 z-50 h-16 border-b border-[var(--cocoa-200)] bg-[var(--cream-50)] shadow-[0_1px_0_var(--cocoa-100)]">
+    <header className="topbar-enter glass-bar sticky top-0 z-50 h-16 border-b border-[var(--cocoa-200)]/70 shadow-[0_1px_0_var(--cocoa-100)]">
       <div className="mx-auto flex h-full max-w-[1600px] items-center justify-between gap-4 px-4 md:px-8">
         <div className="flex items-center gap-3">
-          <svg viewBox="0 0 44 44" className="size-11 shrink-0" role="img" aria-label="Cocoa Bakery CB monogram">
-            <circle cx="22" cy="22" r="21" fill="var(--cocoa-100)" stroke="var(--cocoa-200)" />
-            <text x="22" y="27" textAnchor="middle" fill="var(--cocoa-700)" fontFamily="var(--font-display), Georgia, serif" fontSize="14" fontWeight="700">CB</text>
+          <svg viewBox="0 0 44 44" className="size-11 shrink-0 drop-shadow-sm" role="img" aria-label="Cocoa Bakery CB monogram">
+            <defs>
+              <linearGradient id="cb-mark" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#ba7840" />
+                <stop offset="100%" stopColor="#3d2410" />
+              </linearGradient>
+            </defs>
+            <circle cx="22" cy="22" r="21" fill="url(#cb-mark)" />
+            <circle cx="22" cy="22" r="20" fill="none" stroke="rgba(255,255,255,0.35)" />
+            <text x="22" y="27" textAnchor="middle" fill="#fff8f0" fontFamily="var(--font-display), Georgia, serif" fontSize="14" fontWeight="700">CB</text>
           </svg>
           <div>
             <h1 className="font-display text-xl font-semibold leading-5 text-[var(--cocoa-900)]">Cocoa Bakery</h1>
-            <p className="mt-0.5 text-xs text-[var(--cocoa-600)]">powered by TeamFlow</p>
+            <p className="mt-0.5 flex items-center gap-2 text-xs text-[var(--cocoa-600)]">
+              powered by TeamFlow
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${publicDemo ? 'bg-[var(--cocoa-100)] text-[var(--cocoa-700)]' : 'bg-[var(--sage-100)] text-[var(--sage-700)]'}`}>
+                <span aria-hidden="true" className={`size-1.5 rounded-full bg-current ${publicDemo ? '' : 'live-dot'}`} />
+                {publicDemo ? 'Demo' : 'Live'}
+              </span>
+            </p>
           </div>
         </div>
 
@@ -86,7 +99,7 @@ export function Topbar({ selectedRoleId, personas, publicDemo = false, onRoleSel
           <button
             type="button"
             onClick={onUpload}
-            className="flex min-h-10 items-center gap-2 rounded-[var(--radius-md)] bg-[var(--cocoa-700)] px-4 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-px hover:bg-[var(--cocoa-600)] hover:shadow-md"
+            className="btn-primary flex min-h-10 items-center gap-2 rounded-[var(--radius-md)] px-4 text-sm font-semibold text-white"
           >
             {publicDemo ? <Search className="size-4" aria-hidden="true" /> : <Upload className="size-4" aria-hidden="true" />} {publicDemo ? 'Explore sample resumes' : 'Upload Resumes'}
           </button>

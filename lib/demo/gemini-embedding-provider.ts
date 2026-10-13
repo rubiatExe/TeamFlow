@@ -8,10 +8,10 @@ import {
   type SourceBlockVector,
 } from './semantic-search-core.ts';
 import { SYNTHETIC_CANDIDATE_CORPUS } from '../domain/demo-semantic-search-data.ts';
+import { EMBEDDING_DIMENSIONS } from '../contracts/embedding.ts';
 
 const MODEL_ID = 'gemini-embedding-001';
 const MODEL_RESOURCE = `models/${MODEL_ID}`;
-const EMBEDDING_DIMENSIONS = 768;
 const EMBEDDING_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:batchEmbedContents`;
 const EMBEDDING_DEADLINE_MS = 8_000;
 const MAX_EMBEDDING_RESPONSE_BYTES = 2_000_000;

@@ -39,7 +39,7 @@ function providerUnavailable(): Promise<never> {
 
 function paddedConceptVector(value: string): number[] {
   const vector = createConceptVector(value);
-  return [...vector, ...Array<number>(768 - vector.length).fill(0)];
+  return [...vector, ...Array<number>(3072 - vector.length).fill(0)];
 }
 
 test('query guard accepts job evidence and rejects protected, contact, and decision criteria', () => {
@@ -254,7 +254,7 @@ test('search response labels provider fallback and emits relevance, never a hiri
   }
 });
 
-test('search response reports live Gemini mode only after valid 768d vectors', async () => {
+test('search response reports live Gemini mode only after valid 3072d vectors', async () => {
   const sourceVectors = SYNTHETIC_CANDIDATE_CORPUS.flatMap(candidate => (
     candidate.sourceBlocks.map(sourceBlock => ({
       sourceBlockId: sourceBlock.sourceBlockId,
@@ -269,7 +269,7 @@ test('search response reports live Gemini mode only after valid 768d vectors', a
         queryVector: paddedConceptVector('early morning sourdough baker'),
         sourceVectors,
         modelId: 'gemini-embedding-001',
-        dimensions: 768,
+        dimensions: 3072,
       }),
       liveEmbeddingEnabled: true,
       now: () => 20,
@@ -278,7 +278,7 @@ test('search response reports live Gemini mode only after valid 768d vectors', a
   );
   assert.equal(response.retrieval.mode, 'live_embedding');
   assert.equal(response.retrieval.model_id, 'gemini-embedding-001');
-  assert.equal(response.retrieval.dimensions, 768);
+  assert.equal(response.retrieval.dimensions, 3072);
   assert.equal(response.results[0].display_name, 'Priya S.');
   for (const result of response.results) {
     assert.equal(
@@ -312,24 +312,35 @@ test('Gemini adapter sends separate retrieval tasks, bounds output, and disables
       requests: Array<{ taskType: string; outputDimensionality: number }>;
     };
     observedTasks.push(...body.requests.map(request => request.taskType));
-    assert.ok(body.requests.every(request => request.outputDimensionality === 768));
+    assert.ok(body.requests.every(request => request.outputDimensionality === 3072));
     const traceable = init as RequestInit & {
       opentelemetry?: { propagateContext?: boolean };
     };
     assert.equal(traceable.opentelemetry?.propagateContext, false);
     return Response.json({
       embeddings: body.requests.map((_, index) => ({
-        values: [1 + index, ...Array<number>(767).fill(0)],
+        values: [1 + index, ...Array<number>(3071).fill(0)],
       })),
     });
   };
 
   const vectors = await getGeminiSemanticVectors('barista trainer', { fetchImpl });
   assert.equal(requests, 4);
-  assert.equal(vectors.queryVector.length, 768);
+  assert.equal(vectors.queryVector.length, 3072);
   assert.equal(vectors.sourceVectors.length, 24);
   assert.ok(observedTasks.includes('RETRIEVAL_QUERY'));
   assert.ok(observedTasks.includes('RETRIEVAL_DOCUMENT'));
+
+  const legacyFetch: typeof fetch = async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as { requests: unknown[] };
+    return Response.json({
+      embeddings: body.requests.map(() => ({ values: Array<number>(768).fill(0.01) })),
+    });
+  };
+  await assert.rejects(
+    getGeminiSemanticVectors('barista trainer', { fetchImpl: legacyFetch }),
+    GeminiEmbeddingUnavailableError,
+  );
 });
 
 test('public route enforces JSON, safety, rate limiting, and response correlation', async () => {

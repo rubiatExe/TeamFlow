@@ -12,7 +12,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Literal, TypeVar
+from typing import TypeVar
 
 import google.genai as genai
 from fastapi import FastAPI, File, Header, HTTPException, Request, UploadFile
@@ -23,10 +23,10 @@ from google.genai.types import EmbedContentConfig, HttpOptions, HttpRetryOptions
 from opentelemetry import metrics, trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.trace import Status, StatusCode
-from pydantic import BaseModel, ConfigDict
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from teamflow_document_processor.contracts import (
+    EMBEDDING_DIMENSIONS,
     DocumentExtractionResult,
     ExtractionStatus,
     ExtractionWarning,
@@ -37,6 +37,7 @@ from teamflow_document_processor.extraction import (
     OcrProviderOutput,
     UploadValidationError,
 )
+from teamflow_document_processor.vision import GoogleVisionOcrClient
 from telemetry import setup_telemetry
 
 setup_telemetry(service_name="teamflow-document-processor")
@@ -100,6 +101,16 @@ def _bounded_float_setting(
 
 
 MOCK_MODE = _strict_bool_setting("MOCK_MODE", default=False)
+
+
+def _ocr_provider_setting(environ: Mapping[str, str] = os.environ) -> str:
+    value = environ.get("OCR_PROVIDER", "google_cloud_vision").strip().lower()
+    if value not in {"google_cloud_vision", "gemini"}:
+        raise RuntimeError("OCR_PROVIDER_invalid")
+    return value
+
+
+OCR_PROVIDER = _ocr_provider_setting()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 OCR_SERVICE_TOKEN = os.getenv("OCR_SERVICE_TOKEN", "")
 OCR_TIMEOUT_SECONDS = _bounded_float_setting(
@@ -206,6 +217,18 @@ if not MOCK_MODE and GOOGLE_API_KEY:
     )
     logger.info("Gemini clients initialized")
 
+vision_client: GoogleVisionOcrClient | None = None
+if not MOCK_MODE and OCR_PROVIDER == "google_cloud_vision":
+    try:
+        vision_client = GoogleVisionOcrClient.from_environment(
+            quota_project_id=os.getenv("GOOGLE_CLOUD_QUOTA_PROJECT")
+            or os.getenv("GOOGLE_CLOUD_PROJECT")
+            or None,
+            timeout_seconds=OCR_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        logger.warning("Google Cloud Vision credentials unavailable; readiness disabled")
+
 
 def _record_usage(result: object, model_name: str) -> None:
     usage = getattr(result, "usage_metadata", None)
@@ -247,11 +270,11 @@ def generate_embedding(text: str) -> list[float] | None:
             contents=text,
             config=EmbedContentConfig(
                 task_type="RETRIEVAL_DOCUMENT",
-                output_dimensionality=768,
+                output_dimensionality=EMBEDDING_DIMENSIONS,
             ),
         )
         embedding = result.embeddings[0].values if result.embeddings else []
-        return list(embedding) if len(embedding) == 768 else None
+        return list(embedding) if len(embedding) == EMBEDDING_DIMENSIONS else None
     except Exception as exc:
         logger.warning(
             "Embedding provider failed with %s",
@@ -340,7 +363,29 @@ class GeminiDocumentProvider:
             return embedding
 
 
-provider = GeminiDocumentProvider() if ocr_genai_client and embedding_genai_client else None
+class GoogleVisionDocumentProvider(GeminiDocumentProvider):
+    """Vision transcribes visible pixels; Gemini only generates embeddings."""
+
+    async def extract_text(self, content: bytes, mime_type: str) -> OcrProviderOutput:
+        if vision_client is None:
+            raise RuntimeError("provider_unavailable")
+        started = time.perf_counter()
+        try:
+            return await _run_provider_call(lambda: vision_client.extract_text(content, mime_type))
+        finally:
+            operation_duration.record(
+                time.perf_counter() - started,
+                {"gen_ai.system": "google_cloud_vision", "gen_ai.operation.name": "ocr_extract"},
+            )
+
+
+provider = (
+    GoogleVisionDocumentProvider()
+    if OCR_PROVIDER == "google_cloud_vision" and vision_client is not None
+    else GeminiDocumentProvider()
+    if OCR_PROVIDER == "gemini" and ocr_genai_client is not None
+    else None
+)
 extraction_service = DocumentExtractionService(
     provider,
     mock_mode=MOCK_MODE,
@@ -357,18 +402,6 @@ app = FastAPI(
     redoc_url=None if ENVIRONMENT == "production" else "/redoc",
     openapi_url=None if ENVIRONMENT == "production" else "/openapi.json",
 )
-
-
-class PdfVisualValidationUnavailableDetail(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    code: Literal["pdf_visual_validation_unavailable"]
-
-
-class PdfVisualValidationUnavailableResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    detail: PdfVisualValidationUnavailableDetail
 
 
 def _finish_reason_name(result: object) -> str:
@@ -536,7 +569,11 @@ def _dependencies_ready() -> bool:
             OCR_SERVICE_TOKEN,
             production=ENVIRONMENT == "production",
         )
-        and ocr_genai_client is not None
+        and (
+            vision_client is not None
+            if OCR_PROVIDER == "google_cloud_vision"
+            else ocr_genai_client is not None
+        )
         and embedding_genai_client is not None
     )
 
@@ -603,8 +640,8 @@ def _result_http_status(result: DocumentExtractionResult) -> int:
         422: {"description": "Malformed or unusable extraction"},
         502: {"model": DocumentExtractionResult},
         503: {
-            "model": DocumentExtractionResult | PdfVisualValidationUnavailableResponse,
-            "description": ("Non-scoreable result or PDF visual validation is unavailable"),
+            "model": DocumentExtractionResult,
+            "description": "Non-scoreable result or document processing capacity is unavailable",
         },
         504: {"model": DocumentExtractionResult},
     },
@@ -624,7 +661,10 @@ async def extract_resume_text(
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     with tracer.start_as_current_span("ocr_extraction") as span:
-        span.set_attribute("gen_ai.system", "google_gemini")
+        span.set_attribute(
+            "gen_ai.system",
+            "google_cloud_vision" if OCR_PROVIDER == "google_cloud_vision" else "google_gemini",
+        )
         span.set_attribute("gen_ai.operation.name", "ocr_extract")
         span.set_attribute("teamflow.pipeline.stage", "ocr")
         try:

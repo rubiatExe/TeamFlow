@@ -420,7 +420,7 @@ def test_semantic_search_uses_only_the_scoped_email_free_rpc(
         _settings: server._ServerSettings,
         _query: str,
     ) -> list[float]:
-        return [0.0] * 768
+        return [0.01] * 3072
 
     async def fake_match(
         _settings: server._ServerSettings,
@@ -444,7 +444,7 @@ def test_semantic_search_uses_only_the_scoped_email_free_rpc(
     )
 
     assert captured["params"] == {
-        "candidate_query": [0.0] * 768,
+        "candidate_query": [0.01] * 3072,
         "match_merchant_id": MERCHANT_ID,
         "match_threshold": 0.6,
         "match_count": 4,
@@ -513,6 +513,61 @@ def test_embedding_client_is_bounded_no_retry_and_closed_on_cancellation(
     assert http_options.timeout == server._EMBEDDING_HTTP_TIMEOUT_MS
     assert http_options.retry_options.attempts == 1
     assert captured["closed"] is True
+
+
+@pytest.mark.parametrize(
+    ("embedding", "valid"),
+    [
+        pytest.param([0.01] * 3072, True, id="3072-dimensions"),
+        pytest.param([2**-24] + [0.0] * 3071, True, id="minimum-halfvec-component"),
+        pytest.param([65_504.0] + [0.0] * 3071, True, id="maximum-halfvec-component"),
+        pytest.param([0.01] * 768, False, id="legacy-dimensions"),
+        pytest.param([0.01] * 3071, False, id="short-vector"),
+        pytest.param([0.01] * 3073, False, id="long-vector"),
+        pytest.param([0.0] * 3072, False, id="zero-vector"),
+        pytest.param([2**-25] * 3072, False, id="halfvec-underflow"),
+        pytest.param([-(2**-25)] * 3072, False, id="negative-halfvec-underflow"),
+        pytest.param([0.01] * 3071 + [65_505.0], False, id="halfvec-overflow"),
+        pytest.param([0.01] * 3071 + [-65_505.0], False, id="negative-halfvec-overflow"),
+        pytest.param([0.01] * 3071 + [float("nan")], False, id="nan"),
+        pytest.param([0.01] * 3071 + [float("inf")], False, id="infinite"),
+        pytest.param([0.01] * 3071 + [10**400], False, id="integer-overflow"),
+        pytest.param([0.01] * 3071 + [True], False, id="boolean"),
+        pytest.param([0.01] * 3071 + ["0.01"], False, id="numeric-string"),
+    ],
+)
+def test_query_embedding_requests_3072_and_validates_halfvec_storage(
+    monkeypatch: pytest.MonkeyPatch,
+    embedding: list[object],
+    valid: bool,
+) -> None:
+    captured: dict[str, object] = {"closed": False}
+
+    async def embed_content(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return SimpleNamespace(embeddings=[SimpleNamespace(values=embedding)])
+
+    async def close() -> None:
+        captured["closed"] = True
+
+    monkeypatch.setattr(
+        server.genai,
+        "Client",
+        lambda **_kwargs: SimpleNamespace(
+            aio=SimpleNamespace(models=SimpleNamespace(embed_content=embed_content), aclose=close)
+        ),
+    )
+    settings = server._ServerSettings(
+        environment="test", mock_tools=False, google_api_key="test-google-value"
+    )
+
+    result = asyncio.run(server._get_query_embedding(settings, "espresso"))
+
+    assert captured["model"] == "models/gemini-embedding-001"
+    assert captured["config"].task_type == "RETRIEVAL_QUERY"
+    assert captured["config"].output_dimensionality == 3072
+    assert captured["closed"] is True
+    assert result == (embedding if valid else None)
 
 
 def test_network_budgets_fit_inside_the_graph_tool_timeout() -> None:

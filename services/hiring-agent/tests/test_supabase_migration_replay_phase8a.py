@@ -18,6 +18,11 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 MIGRATION_DIRECTORY = REPOSITORY_ROOT / "supabase/migrations"
 SEED = REPOSITORY_ROOT / "supabase/seed.sql"
 PHASE8A_MIGRATION = MIGRATION_DIRECTORY / "20260828192200_phase8a_supabase_boundary_hardening.sql"
+EMBEDDING_MIGRATION = MIGRATION_DIRECTORY / "20261013135916_gemini_embedding_3072.sql"
+EMBEDDING_TENANT = "00000000-0000-0000-0000-000000000098"
+EMBEDDING_OTHER_TENANT = "00000000-0000-0000-0000-000000000099"
+EMBEDDING_CANDIDATE = "00000000-0000-0000-0000-000000000198"
+EMBEDDING_OTHER_CANDIDATE = "00000000-0000-0000-0000-000000000199"
 CONFIDENCE_POLICY_SHA256 = "c83ba0b8261bd5d863feb154f9c816099efe49f7b222e50fe72a45689f611e53"
 _CONFIDENCE_COMPONENT_IDS = (
     "workflow_completion_gate",
@@ -186,7 +191,158 @@ def test_phase8a_source_preserves_the_phase19_reader_contract() -> None:
     }
 
 
-def test_all_supabase_migrations_replay_from_an_empty_application_schema() -> None:
+def _insert_legacy_embedding_fixtures(connection: psycopg.Connection) -> None:
+    """Exercise an actual upgrade containing existing vectors, not just empty DDL."""
+    for tenant, candidate in (
+        (EMBEDDING_TENANT, EMBEDDING_CANDIDATE),
+        (EMBEDDING_OTHER_TENANT, EMBEDDING_OTHER_CANDIDATE),
+    ):
+        connection.execute(
+            "insert into public.merchants(id, email, store_name) values (%s, %s, %s)",
+            (tenant, f"{tenant}@example.invalid", "Embedding replay merchant"),
+        )
+        connection.execute(
+            """
+            insert into public.candidates(id, merchant_id, name, resume_url,
+              resume_text, embedding)
+            values (%s, %s, 'Embedding replay candidate', 'private/replay.pdf',
+              'Canonical embedding replay evidence', array_fill(1::real, array[768])::vector)
+            """,
+            (candidate, tenant),
+        )
+
+
+def _assert_embedding_upgrade(connection: psycopg.Connection) -> None:
+    rows = connection.execute(
+        """
+        select embedding is null as needs_backfill,
+          embedding_768::text = array_fill(1::real, array[768])::vector::text as preserved
+        from public.candidates where id = any(%s::uuid[])
+        """,
+        ([EMBEDDING_CANDIDATE, EMBEDDING_OTHER_CANDIDATE],),
+    ).fetchall()
+    assert rows == [{"needs_backfill": True, "preserved": True}] * 2
+    column_type = connection.execute(
+        """
+        select format_type(atttypid, atttypmod) as type from pg_attribute
+        where attrelid = 'public.candidates'::regclass and attname = 'embedding'
+        """
+    ).fetchone()
+    assert column_type == {"type": "halfvec(3072)"}
+    index = connection.execute(
+        "select pg_get_indexdef('public.candidates_embedding_idx'::regclass) as definition"
+    ).fetchone()
+    assert "USING hnsw (embedding halfvec_cosine_ops)" in index["definition"]
+    for rpc in ("match_candidates", "teamflow_match_candidates"):
+        functions = connection.execute(
+            """
+            select procedure.prosecdef, procedure.proargtypes[0]::regtype::text as input_type
+            from pg_proc as procedure
+            join pg_namespace as namespace on namespace.oid = procedure.pronamespace
+            where namespace.nspname = 'public' and procedure.proname = %s
+            """,
+            (rpc,),
+        ).fetchall()
+        assert functions == [{"prosecdef": False, "input_type": "halfvec"}]
+
+    for role in ("anon", "authenticated", "teamflow_hiring_reader", "service_role"):
+        access = connection.execute(
+            """
+            select has_function_privilege(%s,
+              'public.complete_candidate_embedding_backfill(uuid,text,halfvec)',
+              'EXECUTE') as backfill
+            """,
+            (role,),
+        ).fetchone()
+        assert access == {"backfill": role == "service_role"}
+    columns = connection.execute(
+        """
+        select has_column_privilege('teamflow_hiring_reader', 'public.candidates',
+          'embedding', 'SELECT') as current,
+          has_column_privilege('teamflow_hiring_reader', 'public.candidates',
+          'embedding_768', 'SELECT') as legacy
+        """
+    ).fetchone()
+    assert columns == {"current": True, "legacy": False}
+
+    query = "[" + ",".join(["1"] * 3072) + "]"
+    legacy_query = "[" + ",".join(["1"] * 768) + "]"
+    zero_query = "[" + ",".join(["0"] * 3072) + "]"
+    backfill_sql = "select public.complete_candidate_embedding_backfill(%s, %s, %s::halfvec)"
+    connection.execute("set role service_role")
+    try:
+        inserted = connection.execute(
+            """
+            insert into public.candidates(merchant_id, name, resume_url, embedding)
+            values (%s, 'New 3072 candidate', 'private/new.pdf', %s::halfvec)
+            returning id, vector_dims(embedding) as dimensions
+            """,
+            (EMBEDDING_TENANT, query),
+        ).fetchone()
+        assert inserted["dimensions"] == 3072
+        connection.execute("delete from public.candidates where id = %s", (inserted["id"],))
+        assert connection.execute(
+            backfill_sql, (EMBEDDING_CANDIDATE, "Stale evidence", query)
+        ).fetchone() == {"complete_candidate_embedding_backfill": False}
+        for invalid in (legacy_query, zero_query):
+            with pytest.raises(psycopg.errors.InvalidParameterValue):
+                connection.execute(
+                    backfill_sql,
+                    (EMBEDDING_CANDIDATE, "Canonical embedding replay evidence", invalid),
+                )
+        for candidate in (EMBEDDING_CANDIDATE, EMBEDDING_OTHER_CANDIDATE):
+            args = (candidate, "Canonical embedding replay evidence", query)
+            assert connection.execute(backfill_sql, args).fetchone() == {
+                "complete_candidate_embedding_backfill": True
+            }
+            assert connection.execute(backfill_sql, args).fetchone() == {
+                "complete_candidate_embedding_backfill": False
+            }
+        # The column itself rejects stale producers, even outside the backfill RPC.
+        with pytest.raises(psycopg.DataError):
+            connection.execute(
+                "update public.candidates set embedding = %s::halfvec where id = %s",
+                (legacy_query, EMBEDDING_CANDIDATE),
+            )
+        legacy_results = connection.execute(
+            "select * from public.match_candidates(%s::halfvec, %s, 0.5, 5)",
+            (query, EMBEDDING_TENANT),
+        ).fetchall()
+        assert len(legacy_results) == 1
+        assert str(legacy_results[0]["id"]) == EMBEDDING_CANDIDATE
+    finally:
+        connection.execute("reset role")
+
+    connection.execute(
+        "select set_config('request.jwt.claims', %s, false)",
+        (f'{{"role":"teamflow_hiring_reader","merchant_id":"{EMBEDDING_TENANT}"}}',),
+    )
+    connection.execute("set role teamflow_hiring_reader")
+    try:
+        match_sql = "select * from public.teamflow_match_candidates(%s::halfvec, %s, 0.5, 5)"
+        matches = connection.execute(match_sql, (query, EMBEDDING_TENANT)).fetchall()
+        assert len(matches) == 1
+        assert str(matches[0]["merchant_id"]) == EMBEDDING_TENANT
+        assert matches[0]["similarity"] == pytest.approx(1)
+        assert connection.execute(match_sql, (query, EMBEDDING_OTHER_TENANT)).fetchall() == []
+        for invalid in (legacy_query, zero_query):
+            assert connection.execute(match_sql, (invalid, EMBEDDING_TENANT)).fetchall() == []
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            connection.execute("select embedding_768 from public.candidates")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            connection.execute(
+                backfill_sql, (EMBEDDING_CANDIDATE, "Canonical embedding replay evidence", query)
+            )
+    finally:
+        connection.execute("reset role")
+
+
+@pytest.mark.parametrize("schema_source", ["migrations", "snapshot"])
+@pytest.mark.parametrize("vector_schema", ["public", "extensions"])
+def test_all_supabase_migrations_replay_from_an_empty_application_schema(
+    schema_source: str,
+    vector_schema: str,
+) -> None:
     source_dsn = os.getenv("TEST_SUPABASE_POSTGRES_DSN")
     if not source_dsn:
         pytest.skip("TEST_SUPABASE_POSTGRES_DSN is not configured")
@@ -203,6 +359,8 @@ def test_all_supabase_migrations_replay_from_an_empty_application_schema() -> No
         "20260828051404_durable_hitl_phase6.sql",
         "20260828192200_phase8a_supabase_boundary_hardening.sql",
         "20260829001553_hitl_actor_capabilities_and_retention_inventory.sql",
+        "20261013134851_google_cloud_vision_extraction_method.sql",
+        "20261013135916_gemini_embedding_3072.sql",
     ]
 
     database = f"teamflow_replay_{uuid4().hex}"
@@ -244,6 +402,15 @@ def test_all_supabase_migrations_replay_from_an_empty_application_schema() -> No
         with psycopg.connect(replay_dsn, autocommit=True, row_factory=dict_row) as connection:
             connection.execute("set role postgres")
             try:
+                # Hosted projects may already have pgvector in extensions, while a
+                # fresh standalone PostgreSQL replay normally installs it in public.
+                connection.execute("create schema if not exists extensions")
+                connection.execute("set search_path = public, extensions")
+                connection.execute(
+                    sql.SQL("create extension if not exists vector with schema {}").format(
+                        sql.Identifier(vector_schema)
+                    )
+                )
                 # Supabase Auth owns these objects before application migrations run.
                 connection.execute(
                     """
@@ -269,11 +436,23 @@ def test_all_supabase_migrations_replay_from_an_empty_application_schema() -> No
                     """,
                     prepare=False,
                 )
-                for migration in migration_files:
-                    connection.execute(
-                        migration.read_text(encoding="utf-8"),
-                        prepare=False,
+                if schema_source == "snapshot":
+                    schema_sql = (REPOSITORY_ROOT / "supabase/schema.sql").read_text(
+                        encoding="utf-8"
                     )
+                    embedding_sql = EMBEDDING_MIGRATION.read_text(encoding="utf-8")
+                    assert schema_sql.endswith(embedding_sql)
+                    connection.execute(schema_sql[: -len(embedding_sql)], prepare=False)
+                    _insert_legacy_embedding_fixtures(connection)
+                    connection.execute(embedding_sql, prepare=False)
+                else:
+                    for migration in migration_files:
+                        if migration == EMBEDDING_MIGRATION:
+                            _insert_legacy_embedding_fixtures(connection)
+                        connection.execute(
+                            migration.read_text(encoding="utf-8"),
+                            prepare=False,
+                        )
                 connection.execute(SEED.read_text(encoding="utf-8"), prepare=False)
                 connection.execute(
                     """
@@ -300,6 +479,8 @@ def test_all_supabase_migrations_replay_from_an_empty_application_schema() -> No
             finally:
                 connection.execute("reset role")
 
+            _assert_embedding_upgrade(connection)
+
             state = connection.execute(
                 """
                 select
@@ -311,23 +492,23 @@ def test_all_supabase_migrations_replay_from_an_empty_application_schema() -> No
                      and relation.relkind = 'r'
                      and relation.relname = any(%s)) as table_count,
                   to_regprocedure(
-                    'public.teamflow_match_candidates(vector,uuid,double precision,integer)'
+                    'public.teamflow_match_candidates(halfvec,uuid,double precision,integer)'
                   ) is not null as scoped_match_rpc,
                   has_function_privilege(
                     'teamflow_hiring_reader',
-                    'public.match_candidates(vector,uuid,double precision,integer)',
+                    'public.match_candidates(halfvec,uuid,double precision,integer)',
                     'EXECUTE'
                   ) as legacy_match_reader,
                   has_function_privilege(
                     'teamflow_hiring_reader',
-                    'public.teamflow_match_candidates(vector,uuid,double precision,integer)',
+                    'public.teamflow_match_candidates(halfvec,uuid,double precision,integer)',
                     'EXECUTE'
                   ) as scoped_match_reader,
                   (select pg_get_function_result(procedure.oid)
                    from pg_proc as procedure
                    where procedure.oid =
                      'public.teamflow_match_candidates(
-                       vector,uuid,double precision,integer
+                       halfvec,uuid,double precision,integer
                      )'::regprocedure) as scoped_match_result,
                   has_column_privilege(
                     'teamflow_hiring_reader', 'public.candidates', 'name', 'SELECT'
@@ -350,7 +531,7 @@ def test_all_supabase_migrations_replay_from_an_empty_application_schema() -> No
                   ) as service_audit_select,
                   has_function_privilege(
                     'service_role',
-                    'public.match_candidates(vector,uuid,double precision,integer)',
+                    'public.match_candidates(halfvec,uuid,double precision,integer)',
                     'EXECUTE'
                   ) as service_legacy_match,
                   has_function_privilege(
@@ -428,7 +609,7 @@ def test_all_supabase_migrations_replay_from_an_empty_application_schema() -> No
                 match_cursor = connection.execute(
                     """
                     select * from public.teamflow_match_candidates(
-                      array_fill(0::real, array[768])::vector,
+                      array_fill(1::real, array[3072])::halfvec,
                       '00000000-0000-0000-0000-000000000099'::uuid,
                       0.5,
                       5

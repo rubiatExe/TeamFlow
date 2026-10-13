@@ -19,20 +19,24 @@ import {
 } from 'lucide-react';
 
 import { CandidateAvatar } from '@/components/candidates/candidate-avatar';
-import { ScoreRing } from '@/components/candidates/score-ring';
-import type { CandidateStatus } from '@/lib/contracts/candidate';
-import type { ParserOutput } from '@/lib/contracts/parser';
+import { ApplicationStatus } from '@/components/candidates/application-status';
+import { CriterionAssessment } from '@/components/search/criterion-assessment';
+import type { ManagerCriteriaCandidateResult } from '@/lib/contracts/manager-criteria';
+import type { CandidateCardData, CandidateStatus } from '@/lib/contracts/candidate';
 import { getRoleById } from '@/lib/domain/roles';
 import { getDemoProfile } from '@/lib/domain/demo-workspace';
+import { scoreCriterion } from '@/lib/domain/scoring-policy';
+import { criteriaBaseScore } from '@/lib/domain/criteria-presentation';
 
 type CandidateActionResult = { ok: true } | { ok: false; message: string };
 
 interface CandidateCardProps {
   candidateId: string;
-  data: ParserOutput;
+  data: CandidateCardData;
   status: CandidateStatus;
   index?: number;
   debugMode?: boolean;
+  addedAssessment?: ManagerCriteriaCandidateResult;
   onAdvance?: (candidateId: string, nextStatus: CandidateStatus) => Promise<CandidateActionResult> | CandidateActionResult;
   onStatusChange?: (candidateId: string, nextStatus: CandidateStatus) => Promise<void> | void;
   onRemove?: (candidateId: string) => Promise<void> | void;
@@ -76,11 +80,16 @@ export function CandidateCard({
   status,
   index = 0,
   debugMode = false,
+  addedAssessment,
   onAdvance,
   onStatusChange,
   onRemove,
 }: CandidateCardProps) {
   const { candidate, score, red_flags: redFlags } = data;
+  const approvedPolicy = score.approved_policy;
+  const samplePolicy = score.calculation === 'sample_policy' ? score.sample_policy : undefined;
+  const weightedPolicy = approvedPolicy ?? samplePolicy;
+  const calculation = score.calculation ?? 'legacy_preview';
   const demoProfile = getDemoProfile(candidateId);
   const simulated = Boolean(demoProfile) || candidateId.startsWith('demo_') || candidateId.startsWith('local_');
   const scorePopoverId = useId();
@@ -116,6 +125,7 @@ export function CandidateCard({
   };
 
   const handleCardKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape') setScoreOpen(false);
     if (event.currentTarget !== event.target) return;
     if ((event.key === 'Enter' || event.key === ' ') && !actionDisabled) {
       event.preventDefault();
@@ -125,6 +135,7 @@ export function CandidateCard({
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.pointerType !== 'touch') return;
+    if (event.target instanceof Element && event.target.closest('button, a, input, select, textarea, summary')) return;
     touchStartXRef.current = event.clientX;
     event.currentTarget.setPointerCapture(event.pointerId);
   };
@@ -191,7 +202,7 @@ export function CandidateCard({
           tabIndex={0}
           data-candidate-card
           onKeyDown={handleCardKeyDown}
-          aria-label={`${candidate.name}, ${STATUS_LABELS[status]}, ${demoProfile ? 'fictional profile' : `fit score ${score.total}`}`}
+          aria-label={`${candidate.name}, ${STATUS_LABELS[status]}, ${score.total === null ? 'awaiting review' : `${samplePolicy ? 'sample score' : 'fit score'} ${score.total}`}`}
           className="group relative min-h-[200px] rounded-[var(--radius-lg)] border border-[var(--cocoa-100)] bg-white p-4 shadow-[var(--shadow-card)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-card-hover)] focus-visible:-translate-y-0.5 focus-visible:shadow-[var(--shadow-card-hover)] sm:p-5"
         >
           <div className="flex items-start justify-between gap-3">
@@ -219,46 +230,34 @@ export function CandidateCard({
             ) : null}
           </div>
 
-          <div className="mt-3 flex flex-col items-center gap-3 text-center sm:flex-row sm:items-start sm:text-left">
-            {!demoProfile ? <div
-              className="relative order-1 sm:order-3 sm:ml-auto"
-              onKeyDown={event => { if (event.key === 'Escape') setScoreOpen(false); }}
-              onBlur={event => {
-                if (!event.currentTarget.contains(event.relatedTarget)) setScoreOpen(false);
-              }}
-            >
-              <ScoreRing
-                score={score.total}
-                expanded={scoreOpen}
-                controls={scorePopoverId}
-                onScoreClick={() => setScoreOpen(true)}
-                onScoreFocus={() => setScoreOpen(true)}
-              />
-              {scoreOpen ? (
-                <div
-                  id={scorePopoverId}
-                  role="tooltip"
-                  tabIndex={-1}
-                  className="absolute left-1/2 top-[calc(100%+12px)] z-30 w-64 -translate-x-1/2 rounded-[var(--radius-md)] bg-[var(--cocoa-900)] p-4 text-left text-white shadow-[var(--shadow-modal)] sm:left-auto sm:right-0 sm:translate-x-0"
-                >
-                  <span aria-hidden="true" className="absolute -top-1.5 left-1/2 size-3 -translate-x-1/2 rotate-45 bg-[var(--cocoa-900)] sm:left-auto sm:right-5 sm:translate-x-0" />
-                  <p className="font-semibold">Why this score?</p>
-                  <dl className="mt-3 space-y-1.5 text-xs">
-                    <div className="flex justify-between gap-4"><dt>Constraints</dt><dd>{score.breakdown.constraints}/50</dd></div>
-                    <div className="flex justify-between gap-4"><dt>Experience</dt><dd>{score.breakdown.experience}/30</dd></div>
-                    <div className="flex justify-between gap-4"><dt>Logistics</dt><dd>{score.breakdown.logistics}/20</dd></div>
-                  </dl>
-                  <p className="mt-3 border-t border-white/20 pt-3 text-xs italic leading-5 text-white/80">{score.explanation}</p>
-                </div>
-              ) : null}
-            </div> : null}
-            <CandidateAvatar name={candidate.name} />
+          <div className="mt-3 flex items-start gap-3 text-left">
+            <div className="hidden min-[420px]:block"><CandidateAvatar name={candidate.name} /></div>
             <div className="min-w-0 flex-1">
-              <h4 className="font-display text-lg font-semibold leading-tight text-[var(--cocoa-900)]">{candidate.name}</h4>
+              <div className="flex items-start justify-between gap-2">
+                <h4 className="min-w-0 pt-1 font-display text-lg font-semibold leading-tight text-[var(--cocoa-900)]">{candidate.name}</h4>
+                {score.total === null ? (
+                  <span className="max-w-20 shrink-0 rounded-lg bg-[var(--cocoa-50)] px-2 py-1 text-center text-[10px] font-semibold text-[var(--cocoa-600)]">Awaiting review</span>
+                ) : (
+                  <button
+                    type="button"
+                    aria-label={`${samplePolicy ? 'Sample' : approvedPolicy ? 'Approved fit' : 'Fit'} score for ${candidate.name}: ${score.total} out of 100. ${scoreOpen ? 'Hide' : 'Show'} criterion contributions.`}
+                    aria-expanded={scoreOpen}
+                    aria-controls={scorePopoverId}
+                    onClick={() => setScoreOpen(previous => !previous)}
+                    className="min-h-14 min-w-20 shrink-0 rounded-xl border border-[var(--cocoa-200)] bg-[var(--cocoa-50)] px-2 py-1.5 text-center text-[var(--cocoa-800)] transition hover:border-[var(--cocoa-500)] hover:bg-[var(--cocoa-100)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cocoa-600)]"
+                  >
+                    <span className="block leading-none"><span className="text-2xl font-bold tabular-nums">{score.total}</span><span className="ml-0.5 text-[10px] font-medium text-[var(--cocoa-500)]">/100</span></span>
+                    <span className="mt-1 flex items-center justify-center gap-0.5 text-[10px] font-semibold">
+                      {samplePolicy ? 'Sample score' : approvedPolicy ? 'Policy score' : calculation === 'legacy_preview' ? 'Legacy preview' : 'Score details'}
+                      <ChevronDown aria-hidden="true" className={`size-3 transition-transform ${scoreOpen ? 'rotate-180' : ''}`} />
+                    </span>
+                  </button>
+                )}
+              </div>
               <p className="mt-1 text-xs font-semibold text-[var(--cocoa-700)]">
-                {role ? `${role.emoji} ${role.title}` : candidate.applied_role || 'Open role'}
+                {candidate.applied_role_title ?? (role ? `${role.emoji} ${role.title}` : candidate.applied_role || 'Open role')}
               </p>
-              <p className="mt-1 flex flex-wrap items-center justify-center gap-1 text-xs text-[var(--cocoa-600)] sm:justify-start">
+              <p className="mt-1 flex flex-wrap items-center gap-1 text-xs text-[var(--cocoa-600)]">
                 {candidate.city ? <><MapPin className="size-3" aria-hidden="true" />{candidate.city}</> : 'Location not listed'}
                 <span aria-hidden="true">•</span>
                 {candidate.experience_years ?? 0} yrs exp
@@ -270,6 +269,66 @@ export function CandidateCard({
               ) : null}
             </div>
           </div>
+
+          <div className="mt-3"><ApplicationStatus application={data.application} sample={simulated} /></div>
+          {addedAssessment && addedAssessment.base_score === criteriaBaseScore(data, Boolean(demoProfile)) ? (
+            <div className="mt-3"><CriterionAssessment assessment={addedAssessment} sample={Boolean(demoProfile)} /></div>
+          ) : null}
+
+          {scoreOpen && score.total !== null ? (
+            <section
+              id={scorePopoverId}
+              aria-label={`Score breakdown for ${candidate.name}`}
+              className="mt-4 min-w-0 rounded-[var(--radius-md)] bg-[var(--cocoa-900)] p-4 text-left text-white [overflow-wrap:anywhere]"
+            >
+              <p className="font-semibold">
+                {samplePolicy
+                  ? 'Sample score breakdown'
+                  : approvedPolicy
+                    ? 'Approved weighted score'
+                    : calculation === 'legacy_preview'
+                      ? 'Legacy preview score'
+                      : 'Score details unavailable'}
+              </p>
+              {weightedPolicy ? (
+                <>
+                  <p className="mt-1 text-xs leading-5 text-white/75">{weightedPolicy.role_title} · {weightedPolicy.policy_id} v{weightedPolicy.policy_version}</p>
+                  <p className="mt-3 text-xs leading-5 text-white/80">Each met criterion adds its full weight to the total. Not met and unknown criteria add 0 points.</p>
+                  <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-white/60">Criterion · earned / possible points</p>
+                  <dl className="mt-2 space-y-3 border-t border-white/20 pt-3 text-xs">
+                    {weightedPolicy.criteria.map(criterion => (
+                      <div key={criterion.criterion_id}>
+                        <div className="flex items-start justify-between gap-3">
+                          <dt className="min-w-0">
+                            <span className="block leading-4">{criterion.criterion_text}</span>
+                            <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-wide text-white/60">{criterion.status === 'not_met' ? 'Not met' : criterion.status === 'unknown' ? 'Not evidenced' : 'Met'}</span>
+                          </dt>
+                          <dd className="shrink-0 text-right font-semibold tabular-nums">
+                            <span className="block">+{scoreCriterion(criterion)} pts</span>
+                            <span className="mt-0.5 block text-[10px] font-normal text-white/60">of {criterion.weight} possible</span>
+                          </dd>
+                        </div>
+                        <div aria-hidden="true" className="relative mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/10">
+                          <div className="absolute h-full rounded-full bg-white/20" style={{ width: `${criterion.weight}%` }} />
+                          <div className="absolute h-full rounded-full bg-[var(--sage-500)]" style={{ width: `${scoreCriterion(criterion)}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </dl>
+                  <p className="mt-3 border-t border-white/20 pt-3 text-xs font-semibold tabular-nums">{weightedPolicy.criteria.map(criterion => scoreCriterion(criterion)).join(' + ')} = {score.total}/100</p>
+                </>
+              ) : calculation === 'legacy_preview' ? (
+                <dl className="mt-3 space-y-1.5 text-xs">
+                  <div className="flex justify-between gap-4"><dt>Constraints</dt><dd>{score.breakdown.constraints}/50</dd></div>
+                  <div className="flex justify-between gap-4"><dt>Experience</dt><dd>{score.breakdown.experience}/30</dd></div>
+                  <div className="flex justify-between gap-4"><dt>Logistics</dt><dd>{score.breakdown.logistics}/20</dd></div>
+                </dl>
+              ) : (
+                <p className="mt-3 text-xs leading-5 text-white/80">The approved total is available, but its matching policy details could not be verified. No breakdown is shown.</p>
+              )}
+              <p className="mt-3 border-t border-white/20 pt-3 text-xs italic leading-5 text-white/80">{score.explanation}</p>
+            </section>
+          ) : null}
 
           {candidate.skills.length > 0 ? (
             <div className="mt-4 flex flex-wrap gap-1.5 border-t border-[var(--cocoa-100)] pt-3" aria-label="Candidate skills">

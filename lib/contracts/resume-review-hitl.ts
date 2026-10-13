@@ -9,6 +9,7 @@ import {
   GapStatusSchema,
   PolicyIdentitySchema,
 } from './resume-review.ts';
+import { summarizeWeightedScore } from '../domain/scoring-policy.ts';
 
 const databaseIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const documentIdPattern = /^doc-[0-9a-f]{64}$/;
@@ -282,22 +283,15 @@ export const ResumeReviewProposalSchema = z.object({
       });
     }
   });
-  const totalWeight = proposal.criterion_details.reduce(
-    (total, criterion) => total + criterion.weight,
-    0,
-  );
-  if (totalWeight !== 100) {
+  const scoreSummary = summarizeWeightedScore(proposal.criterion_details);
+  if (scoreSummary.totalWeight !== 100) {
     context.addIssue({
       code: 'custom',
       path: ['criterion_details'],
       message: 'reviewer criterion weights must reproduce configured policy',
     });
   }
-  const derivedScore = proposal.criterion_details.reduce(
-    (total, criterion) => total + (criterion.status === 'met' ? criterion.weight : 0),
-    0,
-  );
-  if (derivedScore !== topScore) {
+  if (scoreSummary.earnedPoints !== topScore) {
     context.addIssue({
       code: 'custom',
       path: ['criterion_details'],

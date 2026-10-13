@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -34,6 +35,29 @@ document_processor_main = importlib.util.module_from_spec(module_spec)
 sys.modules[module_spec.name] = document_processor_main
 module_spec.loader.exec_module(document_processor_main)
 app = document_processor_main.app
+
+
+@pytest.mark.parametrize("dimensions", [768, 3071, 3072, 3073])
+def test_embedding_provider_requests_3072_and_rejects_other_dimensions(monkeypatch, dimensions):
+    captured = {}
+    embedding = [0.01] * dimensions
+
+    def fake_embed_content(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(embeddings=[SimpleNamespace(values=embedding)])
+
+    monkeypatch.setattr(
+        document_processor_main,
+        "embedding_genai_client",
+        SimpleNamespace(models=SimpleNamespace(embed_content=fake_embed_content)),
+    )
+
+    result = document_processor_main.generate_embedding("Cafe manager resume")
+
+    assert captured["model"] == "models/gemini-embedding-001"
+    assert captured["config"].task_type == "RETRIEVAL_DOCUMENT"
+    assert captured["config"].output_dimensionality == 3072
+    assert result == (embedding if dimensions == 3072 else None)
 
 
 @pytest.mark.parametrize("value", ["", "prod", "production-like", "unknown"])
@@ -166,7 +190,8 @@ def test_extract_rejects_mime_signature_mismatch_before_mock_processing():
     assert response.json() == {"detail": {"code": "mime_signature_mismatch"}}
 
 
-def test_non_mock_image_extraction_returns_typed_success(monkeypatch):
+@pytest.mark.parametrize("upload_mime", ["image/png", "application/pdf"])
+def test_non_mock_image_or_pdf_extraction_returns_typed_success(monkeypatch, upload_mime):
     class SuccessfulProvider:
         def __init__(self):
             self.extract_calls = 0
@@ -185,7 +210,7 @@ def test_non_mock_image_extraction_returns_typed_success(monkeypatch):
         async def generate_embedding(self, text):
             self.embedding_calls += 1
             assert "Morgan Lee" in text
-            return [0.01] * 768
+            return [0.01] * 3072
 
     provider = SuccessfulProvider()
     monkeypatch.setattr(
@@ -199,9 +224,11 @@ def test_non_mock_image_extraction_returns_typed_success(monkeypatch):
         headers={"X-OCR-Token": "test-token"},
         files={
             "file": (
-                "candidate.png",
-                b"\x89PNG\r\n\x1a\nsynthetic image bytes",
-                "image/png",
+                "candidate.pdf" if upload_mime == "application/pdf" else "candidate.png",
+                (FIXTURE_DIR / "digital-resume.pdf").read_bytes()
+                if upload_mime == "application/pdf"
+                else b"\x89PNG\r\n\x1a\nsynthetic image bytes",
+                upload_mime,
             )
         },
     )
@@ -213,12 +240,12 @@ def test_non_mock_image_extraction_returns_typed_success(monkeypatch):
     assert body["extraction_method"] == "gemini_vision"
     assert body["text"].startswith("Morgan Lee")
     assert len(body["source_blocks"]) == 1
-    assert len(body["embedding"]) == 768
+    assert len(body["embedding"]) == 3072
     assert provider.extract_calls == 1
     assert provider.embedding_calls == 1
 
 
-def test_non_mock_pdf_returns_typed_503_and_openapi_documents_both_shapes(
+def test_non_mock_pdf_without_provider_returns_typed_502_and_documented_result(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -239,28 +266,18 @@ def test_non_mock_pdf_returns_typed_503_and_openapi_documents_both_shapes(
         },
     )
 
-    assert response.status_code == 503
-    assert response.json() == {"detail": {"code": "pdf_visual_validation_unavailable"}}
+    assert response.status_code == 502
+    body = response.json()
+    assert body["status"] == "failed"
+    assert body["warnings"] == ["provider_unavailable"]
+    assert body["text"] == ""
+    assert body["source_blocks"] == []
 
     openapi = app.openapi()
-    unavailable_schema = openapi["paths"]["/extract"]["post"]["responses"]["503"]["content"][
+    unavailable_schema = openapi["paths"]["/extract"]["post"]["responses"]["502"]["content"][
         "application/json"
     ]["schema"]
-    referenced_models = {
-        option["$ref"].rsplit("/", 1)[-1]
-        for option in unavailable_schema["anyOf"]
-        if "$ref" in option
-    }
-    assert referenced_models == {
-        "DocumentExtractionResult",
-        "PdfVisualValidationUnavailableResponse",
-    }
-    code_schema = openapi["components"]["schemas"]["PdfVisualValidationUnavailableDetail"][
-        "properties"
-    ]["code"]
-    assert code_schema.get("const", code_schema.get("enum", [None])[0]) == (
-        "pdf_visual_validation_unavailable"
-    )
+    assert unavailable_schema["$ref"].endswith("/DocumentExtractionResult")
 
 
 @pytest.mark.parametrize(
@@ -282,6 +299,7 @@ def test_non_mock_pdf_returns_typed_503_and_openapi_documents_both_shapes(
         ("production", False, "a" * 32, True, True, 200),
     ],
 )
+@pytest.mark.parametrize("ocr_provider", ["gemini", "google_cloud_vision"])
 def test_readiness_is_config_only_and_fails_closed(
     monkeypatch,
     environment,
@@ -290,13 +308,20 @@ def test_readiness_is_config_only_and_fails_closed(
     has_ocr_client,
     has_embedding_client,
     expected_status,
+    ocr_provider,
 ):
+    monkeypatch.setattr(document_processor_main, "OCR_PROVIDER", ocr_provider)
     monkeypatch.setattr(document_processor_main, "ENVIRONMENT", environment)
     monkeypatch.setattr(document_processor_main, "MOCK_MODE", mock_mode)
     monkeypatch.setattr(document_processor_main, "OCR_SERVICE_TOKEN", token)
     monkeypatch.setattr(
         document_processor_main,
         "ocr_genai_client",
+        object() if has_ocr_client else None,
+    )
+    monkeypatch.setattr(
+        document_processor_main,
+        "vision_client",
         object() if has_ocr_client else None,
     )
     monkeypatch.setattr(

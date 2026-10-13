@@ -109,7 +109,7 @@ def test_semantic_search_uses_only_the_scoped_projection_rpc(
         _settings: server._ServerSettings,
         _query: str,
     ) -> list[float]:
-        return [0.25] * 768
+        return [0.25] * 3072
 
     async def fake_match(
         _settings: server._ServerSettings,
@@ -132,7 +132,7 @@ def test_semantic_search_uses_only_the_scoped_projection_rpc(
     )
 
     assert captured["params"] == {
-        "candidate_query": [0.25] * 768,
+        "candidate_query": [0.25] * 3072,
         "match_merchant_id": MERCHANT_ID,
         "match_threshold": 0.6,
         "match_count": 4,

@@ -36,6 +36,12 @@ from .resume_review.api_contracts import ResumeReviewRequest, ResumeReviewRespon
 from .resume_review.confidence import ConfidencePolicyError, load_default_confidence_policy
 from .resume_review.hitl.api import HitlReviewService, build_hitl_router
 from .resume_review.hitl.runtime import HumanReviewRuntime
+from .resume_review.manager_criteria import (
+    ManagerCriteriaEvaluationRequest,
+    ManagerCriteriaEvaluationResponse,
+    ManagerCriteriaProposalRequest,
+    ManagerCriteriaProposalResponse,
+)
 from .resume_review.runtime import (
     ResumeReviewWorkflowBusyError,
     ResumeReviewWorkflowExecutionError,
@@ -601,6 +607,67 @@ def create_hiring_app(
                 {"error": "Workflow failed", "code": "workflow_failed"},
                 status_code=500,
             )
+
+    async def invoke_manager_criteria(
+        request: ManagerCriteriaProposalRequest | ManagerCriteriaEvaluationRequest,
+        method: str,
+    ) -> ManagerCriteriaProposalResponse | ManagerCriteriaEvaluationResponse | JSONResponse:
+        # Defense in depth: even an injected workflow never sees another tenant.
+        if request.merchant_id != runtime.merchant_id:
+            return _json_response(
+                {"error": "Forbidden", "code": "tenant_scope_mismatch"}, status_code=403
+            )
+        invocation = getattr(resume_review_workflow, method, None)
+        if not callable(invocation):
+            return _json_response(
+                {"error": "Workflow is unavailable", "code": "workflow_unavailable"},
+                status_code=503,
+            )
+        try:
+            return await invocation(request)
+        except asyncio.CancelledError:
+            raise
+        except ResumeReviewWorkflowBusyError:
+            return _json_response(
+                {"error": "Workflow is at capacity", "code": "workflow_busy"},
+                status_code=429,
+                headers={"Retry-After": "1"},
+            )
+        except ResumeReviewWorkflowTimeoutError:
+            return _json_response(
+                {"error": "Workflow deadline exceeded", "code": "workflow_timeout"},
+                status_code=504,
+            )
+        except ResumeReviewWorkflowRequestError:
+            return _json_response(
+                {"error": "Invalid request", "code": "invalid_request"}, status_code=422
+            )
+        except ResumeReviewWorkflowExecutionError:
+            return _json_response(
+                {"error": "Workflow failed", "code": "workflow_failed"}, status_code=502
+            )
+        except Exception:
+            return _json_response(
+                {"error": "Workflow failed", "code": "workflow_failed"}, status_code=500
+            )
+
+    @app.post(
+        "/v1/manager-criteria/propose",
+        response_model=ManagerCriteriaProposalResponse,
+    )
+    async def propose_manager_criteria(
+        request: ManagerCriteriaProposalRequest,
+    ) -> ManagerCriteriaProposalResponse | ManagerCriteriaEvaluationResponse | JSONResponse:
+        return await invoke_manager_criteria(request, "propose_manager_criteria")
+
+    @app.post(
+        "/v1/manager-criteria/evaluate",
+        response_model=ManagerCriteriaEvaluationResponse,
+    )
+    async def evaluate_manager_criteria(
+        request: ManagerCriteriaEvaluationRequest,
+    ) -> ManagerCriteriaProposalResponse | ManagerCriteriaEvaluationResponse | JSONResponse:
+        return await invoke_manager_criteria(request, "evaluate_manager_criteria")
 
     return app
 

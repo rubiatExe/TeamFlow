@@ -14,6 +14,7 @@ import logging
 import math
 import os
 import re
+import struct
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -45,6 +46,9 @@ logger = logging.getLogger("teamflow.mcp_server")
 tracer = trace.get_tracer("teamflow.mcp_server", "2.1.0")
 
 _EMBEDDING_MODEL = "models/gemini-embedding-001"
+_EMBEDDING_DIMENSIONS = 3072
+# Match the candidate embedding's halfvec storage range.
+_EMBEDDING_MAX_ABS_COMPONENT = 65_504.0
 _UUID_PATTERN = (
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -494,7 +498,7 @@ async def _get_query_embedding(
     settings: _ServerSettings,
     query: str,
 ) -> list[float] | None:
-    """Generate one bounded, 768-dimensional retrieval-query embedding."""
+    """Generate one bounded, 3072-dimensional retrieval-query embedding."""
 
     if not settings.google_api_key:
         return None
@@ -513,18 +517,22 @@ async def _get_query_embedding(
                 contents=query,
                 config=EmbedContentConfig(
                     task_type="RETRIEVAL_QUERY",
-                    output_dimensionality=768,
+                    output_dimensionality=_EMBEDDING_DIMENSIONS,
                 ),
             )
         embedding = result.embeddings[0].values if result.embeddings else None
         if (
             embedding is None
-            or len(embedding) != 768
+            or len(embedding) != _EMBEDDING_DIMENSIONS
             or any(
-                type(value) not in {int, float} or not math.isfinite(float(value))
+                type(value) not in {int, float}
+                or not math.isfinite(float(value))
+                or abs(value) > _EMBEDDING_MAX_ABS_COMPONENT
                 for value in embedding
             )
-            or not any(float(value) != 0 for value in embedding)
+            or not any(
+                struct.unpack("!e", struct.pack("!e", value))[0] != 0.0 for value in embedding
+            )
         ):
             return None
         return [float(value) for value in embedding]

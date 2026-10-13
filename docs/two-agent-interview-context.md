@@ -83,7 +83,7 @@ FastAPI document processor (Cloud Run target)
     |
     +--> pypdf digital text or Gemini scanned/image transcription --> canonical text
     |
-    +--> Gemini embedding model --> 768-dimensional document embedding
+    +--> Gemini embedding model --> 3072-dimensional document embedding
     |
     +--> optional insert-only tenant-scoped extraction snapshot
     |
@@ -133,7 +133,7 @@ Application-level validation, score calculation, and deterministic JSON merge
 - Gemini is instructed to transcribe rather than summarize and its output is
   accepted only after a normal completion signal and deterministic quality checks.
 - The processor then makes a separate call to `gemini-embedding-001`.
-- The embedding call requests 768 output dimensions using the
+- The embedding call requests 3072 output dimensions using the
   `RETRIEVAL_DOCUMENT` task type.
 - The strict v1 response records status, canonical text, stable source blocks,
   extraction and embedding models, uploaded-byte SHA-256, warnings, and quality.
@@ -157,7 +157,7 @@ Example response:
       "text": "Candidate Name"
     }
   ],
-  "embedding": ["768 finite numbers"],
+  "embedding": ["3072 finite numbers"],
   "extraction_method": "pdf_text",
   "model_id": "pypdf-6.16.2",
   "embedding_model_id": "models/gemini-embedding-001",
@@ -222,7 +222,7 @@ position.
 - Extraction status/warnings and the request ID stay in application state/telemetry;
   they are not sent to Agent 1.
 
-The raw 768-number vector should not be inserted into the LLM prompt. It should
+The raw 3072-number vector should not be inserted into the LLM prompt. It should
 be consumed inside a retrieval tool when semantic search is needed.
 
 ### Required behavior
@@ -599,26 +599,24 @@ access or a general Supabase MCP integration.
 ### Current implementation
 
 - Resume Markdown is embedded with `gemini-embedding-001`.
-- The output dimension is explicitly set to 768.
+- The output dimension is explicitly set to 3072.
 - Resume embeddings use `RETRIEVAL_DOCUMENT`.
 - Search-query embeddings use `RETRIEVAL_QUERY`.
-- Supabase stores the value in a pgvector `vector(768)` column.
+- Supabase stores the value in a pgvector `halfvec(3072)` column.
 - Candidate similarity uses cosine distance through a PostgreSQL RPC.
 - An HNSW index accelerates approximate nearest-neighbor search.
 
-### Why 768 dimensions
+### Why 3072 dimensions
 
-The choice balances:
+This uses the model's full output dimension. The `halfvec(3072)` column uses
+approximately 6 KB per vector before row and index overhead. Half precision
+allows an HNSW cosine index at this size; pgvector's full-precision `vector`
+indexes support at most 2,000 dimensions.
 
-- Semantic representation quality.
-- Approximately 3 KB of pgvector storage per vector.
-- HNSW index memory.
-- Search computation.
-- Compatibility with the existing database schema and RPC.
-
-Larger 1,536- or 3,072-dimensional vectors provide more capacity but require
-more storage and downstream comparison work. The choice should ultimately be
-verified on labeled retrieval queries rather than treated as universally best.
+The migration retains old 768-dimensional embeddings in `embedding_768` until
+the stored resume text is re-embedded. See [the migration guide](embedding-migration.md)
+for the coordinated database and application rollout. Retrieval quality should
+be evaluated on labeled queries; extra dimensions do not guarantee better ranking.
 
 All stored document embeddings and search-query embeddings must use the same
 model family, dimension, and compatible task configuration.
@@ -911,7 +909,7 @@ Evaluate each stage separately.
 - Deterministic digital-PDF extraction plus bounded Gemini fallback for scanned,
   mixed, and image documents.
 - Separate Gemini embedding call.
-- 768-dimensional pgvector storage.
+- 3072-dimensional pgvector storage.
 - Retrieval query/document task-type separation.
 - HNSW cosine-similarity search.
 - Schema-constrained scoring and runtime validation.

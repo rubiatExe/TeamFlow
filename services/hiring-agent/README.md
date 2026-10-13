@@ -115,6 +115,37 @@ instead of falling back to another policy (`GET /ready` returns 503/not ready).
 An unexpected confidence failure during a run fails closed to a typed
 `review_required` response with `confidence_policy_failed`.
 
+## Manager-requested additional criteria
+
+The same composed Agent 1 runtime exposes two private, service-token-protected
+capabilities for the manager's Smart Search approval flow:
+
+- `POST /v1/manager-criteria/propose` accepts `schema_version: "1.0"`, a tenant-bound
+  `merchant_id`, `request_id`, a bounded `manager_request`, and server-selected
+  `role_id`/`role_title` hints. It proposes one to five job-related criteria with
+  positive integer weights totaling 100 and always returns `review_required: true`.
+  The model cannot approve a proposal, issue a hiring decision, or change a score.
+- `POST /v1/manager-criteria/evaluate` accepts the manager-approved criteria,
+  `approved: true`, and up to 20 candidate/document references. The trusted Next.js
+  manager-approval operation must authenticate the manager and verify the proposal
+  before calling this private service. Supplying a boolean here is not itself a
+  browser-facing authorization mechanism.
+
+Evaluation loads immutable résumé snapshots through the existing tenant-bound,
+read-only `get_resume_document` MCP tool. Candidate/document links, snapshot hashes,
+exact source quotes, safety and the existing conservative lexical evidence checks are
+validated before application code sums the weights of `met` criteria. Missing evidence
+stays `unknown`; it is not proof that a candidate lacks a skill. Invalid or unavailable
+source evidence fails closed without a partial score. The original deterministic
+role-policy score is not supplied, overwritten or persisted by these endpoints.
+Next.js keeps that base score separate and owns the manager-reviewed blend.
+
+The capability uses the existing provider failover, tenant binding, concurrency and
+overall deadline, with at most three candidate assessments in parallel. It adds no
+MCP tools, unrestricted catalog access, SQL, administrative scopes, external grants or
+write credentials. Models see only the bounded job request or criterion/source
+context; the application mediates relevant MCP reads.
+
 ## Legacy `/invoke` security and reliability controls
 
 - Strict UUID and JSON contracts reject unknown, oversized, deeply nested, and

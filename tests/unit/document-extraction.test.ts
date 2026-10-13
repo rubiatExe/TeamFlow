@@ -54,7 +54,7 @@ function completeResult() {
         text: 'Northstar Cafe',
       },
     ],
-    embedding: Array.from({ length: 768 }, () => 0.01),
+    embedding: Array.from({ length: 3072 }, () => 0.01),
     extraction_method: 'pdf_text' as const,
     model_id: 'pypdf-6.16.2',
     embedding_model_id: 'models/gemini-embedding-001',
@@ -115,6 +115,33 @@ test('accepts complete and embedding-degraded v1 extraction results', () => {
     scoreable: true,
     reason_codes: [],
   });
+});
+
+test('accepts Cloud Vision provenance without relaxing scoreability or citation integrity', () => {
+  const vision = {
+    ...completeResult(),
+    extraction_method: 'google_cloud_vision',
+    model_id: 'google-cloud-vision-v1-document-text-detection',
+    warnings: ['ocr_required'],
+  };
+  assert.equal(deriveDocumentScoreability(DocumentExtractionResultSchema.parse(vision)).scoreable, true);
+  const degraded = {
+    ...vision,
+    status: 'degraded',
+    embedding: null,
+    embedding_model_id: null,
+    warnings: ['ocr_required', 'embedding_failed'],
+  };
+  assert.equal(deriveDocumentScoreability(DocumentExtractionResultSchema.parse(degraded)).scoreable, true);
+  for (const invalid of [
+    { ...vision, mock: true },
+    { ...vision, model_id: null },
+    { ...vision, warnings: ['ocr_provider_failed'] },
+    { ...vision, source_blocks: [{ ...vision.source_blocks[0], text: 'Tampered text' }] },
+    { ...vision, extraction_method: 'untrusted_ocr' },
+  ]) {
+    assert.equal(DocumentExtractionResultSchema.safeParse(invalid).success, false);
+  }
 });
 
 test('keeps standalone source-block coordinates, digest and Unicode strict', () => {
@@ -317,21 +344,32 @@ test('rejects tampered hashes, source blocks, order and counts', () => {
   }
 });
 
-test('rejects malformed or non-finite 768-dimensional embeddings', () => {
+test('rejects malformed or non-finite 3072-dimensional embeddings', () => {
   const complete = completeResult();
   for (const embedding of [
     [],
-    Array.from({ length: 767 }, () => 0.1),
-    [...Array.from({ length: 767 }, () => 0.1), Number.NaN],
-    [...Array.from({ length: 767 }, () => 0.1), Number.POSITIVE_INFINITY],
-    Array.from({ length: 768 }, () => 0),
-    Array.from({ length: 768 }, () => 1e308),
+    Array.from({ length: 768 }, () => 0.1),
+    Array.from({ length: 3071 }, () => 0.1),
+    [...Array.from({ length: 3071 }, () => 0.1), Number.NaN],
+    [...Array.from({ length: 3071 }, () => 0.1), Number.POSITIVE_INFINITY],
+    Array.from({ length: 3072 }, () => 0),
+    Array.from({ length: 3072 }, () => 1e308),
+    Array.from({ length: 3072 }, () => 65505),
+    Array.from({ length: 3072 }, () => -(2 ** -25)),
   ]) {
     assert.equal(DocumentExtractionResultSchema.safeParse({
       ...complete,
       embedding,
     }).success, false);
   }
+});
+
+test('accepts 3072-dimensional embeddings that remain nonzero in half precision', () => {
+  const embedding = Array<number>(3072).fill(0);
+  embedding[0] = 2 ** -24;
+  assert.equal(DocumentExtractionResultSchema.safeParse({
+    ...completeResult(), embedding,
+  }).success, true);
 });
 
 test('accepts only strict canonical inline PDF, JPEG or PNG parser input', () => {

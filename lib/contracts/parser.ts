@@ -1,6 +1,7 @@
 
 import { z } from 'zod';
 import { SchemaType, type ResponseSchema } from '@google/generative-ai';
+import { EmbeddingSchema } from './embedding.ts';
 
 export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_FILE_NAME_CODE_POINTS = 255;
@@ -178,10 +179,10 @@ export const ParserOutputSchema = z.object({
         explanation: z.string().min(1).max(1_500),
     }),
     red_flags: z.array(z.string()).max(10),
-    // 768-dim pgvector embedding from the document-processing stage.
+    // 3072-dimensional pgvector halfvec embedding from the document-processing stage.
     // Passed through from the OCR response so the frontend can persist it
     // to the candidates table for semantic search via match_candidates().
-    embedding: z.array(z.number()).length(768).nullable().optional(),
+    embedding: EmbeddingSchema.nullable().optional(),
 }).superRefine((output, context) => {
     const breakdownTotal =
         output.score.breakdown.constraints +
