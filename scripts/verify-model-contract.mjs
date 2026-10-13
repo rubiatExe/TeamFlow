@@ -111,7 +111,9 @@ requireExactKeys('model contract', contract, [
   'hiringAgent',
   'embedding',
 ]);
-requireExactKeys('documentOcr', contract.documentOcr, ['models']);
+requireExactKeys('documentOcr', contract.documentOcr, ['provider', 'visionModel', 'models']);
+expectEqual('documentOcr.provider', contract.documentOcr?.provider, 'google_cloud_vision');
+expectEqual('documentOcr.visionModel', contract.documentOcr?.visionModel, 'google-cloud-vision-v1/builtin-stable');
 requireExactKeys('structuredScorer', contract.structuredScorer, [
   'primary',
   'fallback',
@@ -128,7 +130,7 @@ if (contract.schemaVersion !== 1) {
   fail('config/ai-model-contract.json must use schemaVersion 1');
 }
 if (!Array.isArray(contract.documentOcr?.models) || contract.documentOcr.models.length !== 1) {
-  fail('documentOcr.models must contain exactly the one runtime OCR model');
+  fail('documentOcr.models must contain exactly the one opt-in Gemini OCR model');
 }
 
 const ocrModel = contract.documentOcr?.models?.[0];
@@ -169,13 +171,24 @@ const files = {
   documentDeploy: '.github/workflows/deploy-python-service.yml',
   hiringDeploy: '.github/workflows/deploy-hiring-agent.yml',
   schema: 'supabase/schema.sql',
-  embeddingMigration: 'supabase/migrations/001_add_embedding_column.sql',
+  embeddingMigration: 'supabase/migrations/20261013135916_gemini_embedding_3072.sql',
+  documentContract: 'services/document-processor/teamflow_document_processor/contracts.py',
+  embeddingContract: 'lib/contracts/embedding.ts',
+  demoEmbedding: 'lib/demo/gemini-embedding-provider.ts',
 };
 const sources = Object.fromEntries(
   Object.entries(files).map(([name, file]) => [name, readSource(file)]),
 );
 
 const exampleEnvironment = parseAssignments(files.env, sources.env);
+expectAssignment(files.env, exampleEnvironment, 'OCR_PROVIDER', contract.documentOcr.provider);
+requirePattern(files.documentProcessor, sources.documentProcessor,
+  /environ\.get\("OCR_PROVIDER", "google_cloud_vision"\)/,
+  'Vision default provider');
+expectEqual('Vision model provenance', exactCapture(
+  'services/document-processor/teamflow_document_processor/vision.py',
+  readSource('services/document-processor/teamflow_document_processor/vision.py'),
+  /^VISION_MODEL_ID = "([^"]+)"$/m, 'VISION_MODEL_ID assignment'), contract.documentOcr.visionModel);
 expectAssignment(files.env, exampleEnvironment, 'SCORER_MODEL', scorerModel);
 expectAssignment(
   files.env,
@@ -338,14 +351,19 @@ expectEqual(
   `${files.documentProcessor} embedding dimensions`,
   Number(
     exactCapture(
-      files.documentProcessor,
-      sources.documentProcessor,
-      /output_dimensionality=(\d+)/m,
-      'embedding output_dimensionality',
+      files.documentContract,
+      sources.documentContract,
+      /^EMBEDDING_DIMENSIONS = (\d+)$/m,
+      'embedding dimension constant',
     ),
   ),
   embeddingDimensions,
 );
+requirePattern(files.documentProcessor, sources.documentProcessor,
+  /output_dimensionality=EMBEDDING_DIMENSIONS\b/m, 'shared document embedding dimensions');
+requirePattern(files.documentProcessor, sources.documentProcessor,
+  /from teamflow_document_processor\.contracts import \([\s\S]*?\bEMBEDDING_DIMENSIONS,/m,
+  'document dimension constant imported from its contract');
 expectEqual(
   `${files.mcpServer} embedding task`,
   exactCapture(
@@ -362,12 +380,24 @@ expectEqual(
     exactCapture(
       files.mcpServer,
       sources.mcpServer,
-      /output_dimensionality=(\d+)/m,
-      'embedding output_dimensionality',
+      /^_EMBEDDING_DIMENSIONS = (\d+)$/m,
+      'embedding dimension constant',
     ),
   ),
   embeddingDimensions,
 );
+requirePattern(files.mcpServer, sources.mcpServer,
+  /output_dimensionality=_EMBEDDING_DIMENSIONS\b/m, 'shared query embedding dimensions');
+expectEqual(`${files.embeddingContract} embedding dimensions`, Number(exactCapture(
+  files.embeddingContract, sources.embeddingContract,
+  /^export const EMBEDDING_DIMENSIONS = (\d+);$/m,
+  'TypeScript embedding dimension constant',
+)), embeddingDimensions);
+requirePattern(files.demoEmbedding, sources.demoEmbedding,
+  /import \{ EMBEDDING_DIMENSIONS \} from '\.\.\/contracts\/embedding\.ts';/,
+  'shared demo embedding dimension import');
+requirePattern(files.demoEmbedding, sources.demoEmbedding,
+  /outputDimensionality: EMBEDDING_DIMENSIONS\b/m, 'shared demo embedding dimensions');
 
 const documentDeployment = parseAssignments(files.documentDeploy, sources.documentDeploy);
 const hiringDeployment = parseAssignments(files.hiringDeploy, sources.hiringDeploy);
@@ -395,8 +425,8 @@ for (const [file, source] of [
       exactCapture(
         file,
         source,
-        /(?<!_)embedding vector\((\d+)\)/m,
-        'candidate embedding vector declaration',
+        /(?<!_)embedding halfvec\((\d+)\)/m,
+        'current candidate embedding halfvec declaration',
       ),
     ),
     embeddingDimensions,
@@ -407,12 +437,18 @@ for (const [file, source] of [
       exactCapture(
         file,
         source,
-        /query_embedding vector\((\d+)\)/m,
-        'query embedding vector declaration',
+        /query_embedding halfvec\((\d+)\)/m,
+        'current query embedding halfvec declaration',
       ),
     ),
     embeddingDimensions,
   );
+  expectEqual(`${file} scoped query dimensions`, Number(exactCapture(
+    file, source, /candidate_query halfvec\((\d+)\)/m,
+    'current scoped query embedding halfvec declaration',
+  )), embeddingDimensions);
+  requirePattern(file, source, /using hnsw \(embedding halfvec_cosine_ops\)/i,
+    'half-precision HNSW cosine index');
 }
 
 const documentationExpectations = [

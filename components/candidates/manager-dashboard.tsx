@@ -18,13 +18,17 @@ import { LeftRail } from '@/components/layout/left-rail';
 import { MainTabs, type DashboardTab } from '@/components/layout/main-tabs';
 import { StatsBar, type DashboardStats } from '@/components/layout/stats-bar';
 import { Topbar } from '@/components/layout/topbar';
+import { ReviewQueueTab } from '@/components/review/review-queue-tab';
 import { SmartSearchTab } from '@/components/search/smart-search-tab';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { OnboardingBanner } from '@/components/ui/onboarding-banner';
 import { useToast } from '@/components/ui/toast';
 import { UploadTab } from '@/components/upload/upload-tab';
 import type { CandidateStatus, CandidateWithStatus, InviteRequest } from '@/lib/contracts/candidate';
-import { deleteCandidateFromSupabase, DEMO_MERCHANT_ID, loadCandidatesFromSupabase, type CandidateRow, updateCandidateStatus } from '@/lib/db/supabase';
+import type { ManagerCriteriaEvaluation } from '@/lib/contracts/manager-criteria';
+import { deleteCandidateFromSupabase, DEMO_MERCHANT_ID, loadCandidatesFromSupabase, updateCandidateStatus } from '@/lib/db/supabase';
+import { compareCandidateScores, hasCandidateScore, rowToCandidate } from '@/lib/domain/candidate-presentation';
+import { isCriteriaEvaluationCurrent } from '@/lib/domain/criteria-presentation';
 import { createDemoCandidates, createDemoPersonas, DEMO_WORKSPACE_STORAGE_KEY, isDemoCandidateId, parseDemoWorkspace, personaForRole, restoreDemoCandidates, serializeDemoWorkspace } from '@/lib/domain/demo-workspace';
 import { CAFE_ROLES, getRoleById, getRoleOrDefault } from '@/lib/domain/roles';
 
@@ -46,32 +50,6 @@ function parseInviteResult(value: unknown): InviteResult | null {
   const error = result.error as Record<string, unknown>;
   if (typeof error.message !== 'string' || typeof error.retryable !== 'boolean') return null;
   return { success: false, error: { message: error.message, retryable: error.retryable } };
-}
-
-function rowToCandidate(row: CandidateRow): CandidateWithStatus {
-  const requestedRole = row.analysis?.applied_role || row.job_id || 'barista';
-  const roleId = getRoleById(requestedRole)?.id ?? 'barista';
-  return {
-    id: row.id || `candidate_${crypto.randomUUID()}`,
-    status: (row.status as CandidateStatus) || 'new',
-    data: {
-      candidate: {
-        name: row.name,
-        email: row.email,
-        phone: row.phone,
-        city: row.city,
-        skills: row.analysis?.skills || [],
-        experience_years: row.analysis?.experience_years,
-        applied_role: roleId,
-      },
-      score: {
-        total: row.fit_score || 0,
-        breakdown: row.analysis?.breakdown || { constraints: 0, experience: 0, logistics: 0 },
-        explanation: row.analysis?.explanation || row.summary || 'Awaiting manager review.',
-      },
-      red_flags: row.red_flags || [],
-    },
-  };
 }
 
 const CONFETTI = Array.from({ length: 20 }, (_, index) => ({
@@ -96,12 +74,14 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
   const [showMobileTools, setShowMobileTools] = useState(false);
   const [showHiredModal, setShowHiredModal] = useState<string | null>(null);
   const [usingSampleData, setUsingSampleData] = useState(true);
+  const [candidateLoadFailed, setCandidateLoadFailed] = useState(false);
   const [demoStorageReady, setDemoStorageReady] = useState(false);
   const [demoStorageAvailable, setDemoStorageAvailable] = useState(true);
   const [debugMode, setDebugMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [minScore, setMinScore] = useState(0);
   const [stageVisibility, setStageVisibility] = useState<StageVisibility>({ new: true, invited: true, interviewed: true });
+  const [criteriaEvaluations, setCriteriaEvaluations] = useState<Record<string, ManagerCriteriaEvaluation>>({});
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -140,26 +120,39 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
 
   useEffect(() => {
     if (!interactiveDemoEnabled) return;
+    if (activeTab !== 'candidates') return;
     let cancelled = false;
     void loadCandidatesFromSupabase(DEMO_MERCHANT_ID).then(rows => {
-      if (cancelled || !rows || rows.length === 0) return;
+      if (cancelled) return;
+      setCandidateLoadFailed(false);
+      if (rows.length === 0) {
+        // A successful empty refresh must remove deleted saved applicants.
+        // Keep only browser-local previews when no server rows exist yet.
+        setCandidates(previous => previous.filter(candidate => isDemoCandidateId(candidate.id)
+          || candidate.id.startsWith('demo_') || candidate.id.startsWith('local_')));
+        return;
+      }
       setCandidates(rows.map(rowToCandidate));
       setUsingSampleData(false);
+    }).catch(() => {
+      if (!cancelled) setCandidateLoadFailed(true);
     });
     return () => { cancelled = true; };
-  }, [interactiveDemoEnabled]);
+  }, [activeTab, interactiveDemoEnabled]);
 
   const roleCandidates = useMemo(() => candidates.filter(candidate => candidate.data.candidate.applied_role === selectedRoleId), [candidates, selectedRoleId]);
-  const visibleCandidates = useMemo(() => {
+  const matchingCandidates = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase('en-US');
-    return roleCandidates.filter(candidate => {
-      if (!isDemoCandidateId(candidate.id) && candidate.data.score.total < minScore) return false;
+    return candidates.filter(candidate => {
+      if (!isDemoCandidateId(candidate.id) && hasCandidateScore(candidate) && candidate.data.score.total < minScore) return false;
       if (!query) return true;
       return candidate.data.candidate.name.toLocaleLowerCase('en-US').includes(query)
         || candidate.data.candidate.email?.toLocaleLowerCase('en-US').includes(query)
         || candidate.data.candidate.skills.some(skill => skill.toLocaleLowerCase('en-US').includes(query));
     });
-  }, [minScore, roleCandidates, searchQuery]);
+  }, [candidates, minScore, searchQuery]);
+  const visibleCandidates = useMemo(() => matchingCandidates.filter(candidate => candidate.data.candidate.applied_role === selectedRoleId), [matchingCandidates, selectedRoleId]);
+  const otherRoleCandidates = useMemo(() => matchingCandidates.filter(candidate => !getRoleById(candidate.data.candidate.applied_role || '')), [matchingCandidates]);
 
   const stageVisibleCandidates = useMemo(() => visibleCandidates
     .filter(candidate => (
@@ -168,10 +161,15 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
       || (candidate.status === 'invited' && stageVisibility.invited)
       || (candidate.status === 'interviewed' && stageVisibility.interviewed)
     )), [stageVisibility, visibleCandidates]);
-  const searchCandidateRefs = useMemo(() => stageVisibleCandidates
-    .filter(candidate => isDemoCandidateId(candidate.id))
-    .map(candidate => candidate.id), [stageVisibleCandidates]);
-  const hasScoredCandidates = roleCandidates.some(candidate => !isDemoCandidateId(candidate.id));
+  const searchCandidateRefs = useMemo(() => stageVisibleCandidates.map(candidate => candidate.id), [stageVisibleCandidates]);
+  const savedCriteriaEvaluation = criteriaEvaluations[selectedRoleId];
+  const criteriaEvaluation = savedCriteriaEvaluation && isCriteriaEvaluationCurrent(savedCriteriaEvaluation, candidates, usingSampleData)
+    ? savedCriteriaEvaluation : undefined;
+  const addedAssessments = useMemo(() => Object.fromEntries(
+    Object.values(criteriaEvaluations).filter(evaluation => isCriteriaEvaluationCurrent(evaluation, candidates, usingSampleData)).flatMap(evaluation => evaluation.results)
+      .map(result => [result.candidate_id, result]),
+  ), [criteriaEvaluations, candidates, usingSampleData]);
+  const hasScoredCandidates = roleCandidates.some(candidate => !isDemoCandidateId(candidate.id) && hasCandidateScore(candidate));
 
   const candidateCounts = useMemo(() => Object.fromEntries(CAFE_ROLES.map(role => [
     role.id,
@@ -187,9 +185,9 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
       hired: roleCandidates.filter(candidate => candidate.status === 'hired').length,
     };
     const total = roleCandidates.length;
-    const scoredCandidates = roleCandidates.filter(candidate => !isDemoCandidateId(candidate.id));
+    const scoredCandidates = roleCandidates.filter(candidate => !isDemoCandidateId(candidate.id)).filter(hasCandidateScore);
     const avgScore = scoredCandidates.length ? Math.round(scoredCandidates.reduce((sum, candidate) => sum + candidate.data.score.total, 0) / scoredCandidates.length) : 0;
-    const top = [...scoredCandidates].sort((left, right) => right.data.score.total - left.data.score.total)[0];
+    const top = [...scoredCandidates].sort(compareCandidateScores)[0];
     return {
       total,
       avgScore,
@@ -277,7 +275,11 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
     const candidate: CandidateWithStatus = {
       id: candidateId ?? `local_${crypto.randomUUID()}`,
       status: candidateId ? 'new' : 'pending',
-      data: { ...result, candidate: { ...result.candidate, applied_role: roleId } },
+      data: {
+        ...result,
+        candidate: { ...result.candidate, applied_role: roleId },
+        score: candidateId ? { ...result.score, total: null, calculation: 'awaiting_review' } : result.score,
+      },
     };
     setCandidates(previous => [candidate, ...previous]);
     setUsingSampleData(false);
@@ -291,6 +293,7 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
   };
 
   const resetDemo = () => {
+    setCriteriaEvaluations({});
     setCandidates(createDemoCandidates());
     setPersonas(createDemoPersonas());
     setSearchQuery('');
@@ -339,11 +342,17 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
 
         <main id="main-content" className="min-w-0 flex-1 px-4 pb-10 md:px-6 lg:px-8">
           <MainTabs activeTab={activeTab} candidateCount={stats.total} onTabChange={setActiveTab} />
-          {usingSampleData ? (
-            <aside className="mt-4 flex flex-col gap-3 rounded-[var(--radius-md)] border border-[var(--cocoa-200)] bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between" aria-label="Demo workspace notice">
+          {candidateLoadFailed ? (
+            <p role="alert" className="mt-4 rounded-[var(--radius-md)] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Could not load saved applicants. {usingSampleData ? 'Showing sample profiles.' : 'Showing previously loaded applicants; scores may be out of date.'} Return to Candidates to retry.
+            </p>
+          ) : null}
+          {savedCriteriaEvaluation && !criteriaEvaluation ? <p role="status" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">A profile, role, or base score changed since the added assessment. Its updated scores are hidden. Use Smart Search to propose and approve a fresh assessment.</p> : null}
+          {usingSampleData && activeTab !== 'review' ? (
+            <aside className="mt-4 flex flex-col gap-3 rounded-[var(--radius-md)] border border-[var(--cocoa-200)] bg-white/80 px-4 py-3 backdrop-blur sm:flex-row sm:items-center sm:justify-between" aria-label="Demo workspace notice">
               <div className="text-xs leading-5 text-[var(--cocoa-700)]">
-                <p className="font-semibold">Demo · fictional applicants</p>
-                <p>Practice the hiring workflow. Invitations are simulated; no messages are sent.</p>
+                <p className="font-semibold">{interactiveDemoEnabled ? 'Sample data · upload a résumé to start your real pipeline' : 'Demo · fictional applicants'}</p>
+                <p>{interactiveDemoEnabled ? 'These sample profiles disappear as soon as real applicants are saved. Invitations to sample profiles are simulated.' : 'Practice the hiring workflow. Invitations are simulated; no messages are sent.'}</p>
                 <p>{!interactiveDemoEnabled && demoStorageAvailable ? 'Demo stages and settings stay in this browser.' : 'Demo changes last for this page visit only.'}</p>
               </div>
               <button type="button" onClick={resetDemo} className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-[var(--radius-md)] border border-[var(--cocoa-300)] px-3 text-xs font-semibold text-[var(--cocoa-700)] hover:bg-[var(--cocoa-50)]"><RotateCcw className="size-3.5" aria-hidden="true" /> Reset demo</button>
@@ -363,7 +372,7 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
                   <div>
                     <p className="cocoa-label">{currentRole.emoji} {currentRole.title} pipeline</p>
                     <h2 id="candidates-title" className="mt-1 font-display text-3xl font-semibold text-[var(--cocoa-900)]">Candidates</h2>
-                    <p className="mt-1 text-sm text-[var(--cocoa-600)]">{candidateCountLabel} · {usingSampleData ? 'fictional profiles, listed alphabetically' : 'sorted by fit score'}</p>
+                    <p className="mt-1 text-sm text-[var(--cocoa-600)]">{candidateCountLabel} · {usingSampleData ? 'fictional profiles, listed alphabetically' : hasScoredCandidates ? 'scored applicants first; awaiting review listed separately' : 'awaiting review, listed alphabetically'}</p>
                   </div>
                   <div className="relative w-full sm:max-w-xs">
                     <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--cocoa-500)]" aria-hidden="true" />
@@ -372,16 +381,30 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
                     {searchQuery ? <button type="button" onClick={() => setSearchQuery('')} aria-label="Clear candidate search" className="absolute right-1 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-lg text-[var(--cocoa-600)] hover:bg-[var(--cocoa-100)]"><X className="size-4" aria-hidden="true" /></button> : null}
                   </div>
                 </div>
+                {criteriaEvaluation ? (
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--sage-100)] bg-[var(--sage-50)] p-3 text-xs leading-5 text-[var(--cocoa-700)]">
+                    <p>Added criteria approved for {criteriaEvaluation.results.length} profiles · Base and updated scores shown separately. Session only; board order and filters still use the base score.</p>
+                    <button type="button" onClick={() => setActiveTab('search')} className="min-h-9 rounded-full bg-white px-3 font-semibold text-[var(--sage-700)]">Review criteria</button>
+                  </div>
+                ) : null}
                 <CandidateBoard
                   candidates={stageVisibleCandidates}
                   sampleMode={usingSampleData}
                   stageVisibility={stageVisibility}
                   debugMode={debugMode}
+                  addedAssessments={addedAssessments}
                   onAdvance={handleAdvance}
                   onStatusChange={handleStatusChange}
                   onRemove={handleRemove}
                   onUpload={interactiveDemoEnabled ? () => setActiveTab('upload') : undefined}
                 />
+                {otherRoleCandidates.length > 0 ? (
+                  <section aria-labelledby="other-role-candidates-title" className="mt-8 border-t border-[var(--cocoa-200)] pt-6">
+                    <h3 id="other-role-candidates-title" className="font-display text-xl font-semibold text-[var(--cocoa-900)]">Other roles and unassigned applicants</h3>
+                    <p className="mb-4 mt-1 text-sm text-[var(--cocoa-600)]">These applicants have a role outside the sidebar catalog or no assigned role. Their applied roles are shown on each card.</p>
+                    <CandidateBoard candidates={otherRoleCandidates} stageVisibility={stageVisibility} debugMode={debugMode} onAdvance={handleAdvance} onStatusChange={handleStatusChange} onRemove={handleRemove} />
+                  </section>
+                ) : null}
               </section>
             ) : null}
 
@@ -395,15 +418,15 @@ export function ManagerDashboard({ interactiveDemoEnabled = false }: ManagerDash
               />
             ) : null}
 
-            {activeTab === 'search' ? usingSampleData ? (
-              <SmartSearchTab debugMode={debugMode} roleId={selectedRoleId} candidateRefs={searchCandidateRefs} />
-            ) : (
-              <section aria-labelledby="connected-search-title" className="rounded-[var(--radius-lg)] border border-[var(--cocoa-200)] bg-white p-6">
-                <h2 id="connected-search-title" className="font-display text-2xl text-[var(--cocoa-900)]">Smart Search is a fictional-profile demo</h2>
-                <p className="mt-2 text-sm leading-6 text-[var(--cocoa-600)]">Your connected applicants are not part of the public search corpus. Use the name, email, and skill filter on Candidates to review this workspace.</p>
-                <button type="button" onClick={() => setActiveTab('candidates')} className="mt-4 min-h-11 rounded-[var(--radius-md)] bg-[var(--cocoa-700)] px-4 text-sm font-semibold text-white">View Candidates</button>
-              </section>
+            {activeTab === 'search' ? (
+              <SmartSearchTab debugMode={debugMode} roleId={selectedRoleId} candidateRefs={searchCandidateRefs} sample={usingSampleData}
+                evaluation={criteriaEvaluation}
+                onEvaluation={evaluation => setCriteriaEvaluations(previous => ({ ...previous, [evaluation.role_id]: evaluation }))}
+                onClear={() => setCriteriaEvaluations(previous => { const next = { ...previous }; delete next[selectedRoleId]; return next; })}
+              />
             ) : null}
+
+            {activeTab === 'review' ? <ReviewQueueTab /> : null}
           </div>
         </main>
       </div>

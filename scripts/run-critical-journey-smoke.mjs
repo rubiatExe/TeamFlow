@@ -73,7 +73,7 @@ async function waitForServer(baseUrl, child, logs) {
   throw new Error(`Next server did not become ready within 45 seconds:\n${logs.value}`);
 }
 
-function runSmokeTests(baseUrl) {
+function runSmokeTests(baseUrl, criteriaEnabled = false) {
   return new Promise((resolveTests, reject) => {
     const child = spawn(process.execPath, ['--test', testFile], {
       cwd: repositoryRoot,
@@ -81,6 +81,7 @@ function runSmokeTests(baseUrl) {
         ...process.env,
         TEAMFLOW_SMOKE_BASE_URL: baseUrl,
         TEAMFLOW_SMOKE_MODE: mode,
+        TEAMFLOW_SMOKE_CRITERIA_ENABLED: criteriaEnabled ? 'true' : 'false',
       },
       stdio: 'inherit',
     });
@@ -106,7 +107,7 @@ async function main() {
   const suppliedBaseUrl = process.env.TEAMFLOW_SMOKE_BASE_URL;
   if (suppliedBaseUrl) {
     const baseUrl = new URL(suppliedBaseUrl).origin;
-    await runSmokeTests(baseUrl);
+    await runSmokeTests(baseUrl, process.env.TEAMFLOW_SMOKE_CRITERIA_ENABLED === 'true');
     return;
   }
 
@@ -117,6 +118,7 @@ async function main() {
     NEXT_TELEMETRY_DISABLED: '1',
     TEAMFLOW_OTEL_ENABLED: 'false',
     TEAMFLOW_PUBLIC_DEMO_LIVE_EMBEDDINGS: 'false',
+    MANAGER_CRITERIA_SIGNING_SECRET: 'teamflow-local-smoke-only-signing-secret-2026',
   };
   delete serverEnvironment.NODE_ENV;
   if (mode === 'development') {
@@ -144,7 +146,7 @@ async function main() {
 
   try {
     const readyBaseUrl = await waitForServer(baseUrl, server, logs);
-    await runSmokeTests(readyBaseUrl);
+    await runSmokeTests(readyBaseUrl, true);
   } finally {
     await stopServer(server);
   }

@@ -55,6 +55,47 @@ function assertNamedServerRenderedControls(html) {
   assert.deepEqual(unnamedButtons, []);
 }
 
+if (process.env.TEAMFLOW_SMOKE_CRITERIA_ENABLED === 'true') {
+  test('sample criteria approvals preserve the actual browser origin and reject cross-origin requests', async () => {
+    const proposalRequest = {
+      action: 'propose', mode: 'sample', role_id: 'barista',
+      candidate_ids: ['SYN-CAND-002'], manager_request: 'Latte art and weekend availability',
+    };
+    const headers = { 'Content-Type': 'application/json', Origin: baseUrl, 'Sec-Fetch-Site': 'same-origin' };
+    const proposalResponse = await request('/api/manager-criteria', {
+      method: 'POST', headers, body: JSON.stringify(proposalRequest),
+    });
+    assert.equal(proposalResponse.status, 200);
+    const proposal = await proposalResponse.json();
+    assert.equal(proposal.status, 'review_required');
+    assert.equal(proposal.mode, 'sample');
+    assert.deepEqual(proposal.candidate_ids, ['SYN-CAND-002']);
+    assert.equal('results' in proposal, false);
+
+    const approved = await request('/api/manager-criteria', {
+      method: 'POST', headers,
+      body: JSON.stringify({ action: 'approve', approval_token: proposal.approval_token,
+        criteria: proposal.criteria, additional_weight_percent: 20 }),
+    });
+    assert.equal(approved.status, 200);
+    const assessment = await approved.json();
+    assert.equal(assessment.status, 'evaluated');
+    assert.equal(assessment.proposal_id, proposal.proposal_id);
+    assert.equal(assessment.results[0].candidate_id, 'SYN-CAND-002');
+    assert.equal(assessment.results[0].base_score, 90);
+    assert.equal(assessment.results[0].updated_score, 82);
+
+    for (const origin of ['https://attacker.invalid', 'null']) {
+      const rejected = await request('/api/manager-criteria', {
+        method: 'POST', headers: { ...headers, Origin: origin, 'X-Forwarded-Host': 'attacker.invalid' },
+        body: JSON.stringify(proposalRequest),
+      });
+      assert.equal(rejected.status, 403);
+      assert.equal((await rejected.json()).code, 'invalid_origin');
+    }
+  });
+}
+
 if (mode === 'development') {
   test('public Cocoa dashboard renders its accessible hiring workspace', async () => {
     const response = await request('/');

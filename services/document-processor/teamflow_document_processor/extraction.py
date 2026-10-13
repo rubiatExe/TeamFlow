@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import hashlib
 import json
 import math
@@ -14,12 +16,12 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Protocol
 
-import pypdf
 from pypdf import PdfReader
 from pypdf.generic import ContentStream
 
 from .contracts import (
     EMBEDDING_DIMENSIONS,
+    EMBEDDING_MAX_ABS_COMPONENT,
     MAX_EXTRACTED_CHARACTERS,
     MAX_SOURCE_BLOCK_CHARACTERS,
     SCHEMA_VERSION,
@@ -32,6 +34,14 @@ from .contracts import (
     QualityReason,
     SourceBlock,
     is_shared_blank,
+)
+from .pdf_render_limits import (
+    MAX_PDF_PAGE_DIMENSION,
+    MAX_PDF_PAGE_PIXELS,
+    MAX_PDF_PAGE_PNG_BYTES,
+    MAX_PDF_RENDER_OUTPUT_BYTES,
+    MAX_PDF_TOTAL_PNG_BYTES,
+    MAX_RENDERED_PDF_PAGES,
 )
 
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
@@ -57,6 +67,7 @@ EMBEDDING_MODEL_ID = "models/gemini-embedding-001"
 _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9._/:-]{1,200}$")
 _PDF_ADMISSION = threading.BoundedSemaphore(value=2)
 _PDF_WORKER_PATH = Path(__file__).with_name("pdf_worker.py")
+_PDF_RENDER_WORKER_PATH = Path(__file__).with_name("pdf_render_worker.py")
 
 
 class UploadValidationError(ValueError):
@@ -90,6 +101,7 @@ class OcrProviderOutput:
     text: object
     model_id: str
     finish_reason: str
+    extraction_method: ExtractionMethod = ExtractionMethod.GEMINI_VISION
 
 
 class DocumentProvider(Protocol):
@@ -619,6 +631,138 @@ async def _terminate_pdf_worker(process: asyncio.subprocess.Process) -> None:
         await process.wait()
 
 
+async def _communicate_render_worker(process: asyncio.subprocess.Process, content: bytes) -> bytes:
+    """Unlike communicate(), bound stdout while reading, not after allocation."""
+    if process.stdin is None or process.stdout is None:
+        raise DocumentStructureError(ExtractionWarning.MALFORMED_DOCUMENT)
+
+    async def send_input() -> None:
+        try:
+            process.stdin.write(content)
+            await process.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            process.stdin.close()
+
+    async def receive_output() -> bytes:
+        result = bytearray()
+        while True:
+            chunk = await process.stdout.read(64 * 1024)
+            if not chunk:
+                return bytes(result)
+            if len(result) + len(chunk) > MAX_PDF_RENDER_OUTPUT_BYTES:
+                raise DocumentStructureError(ExtractionWarning.MALFORMED_DOCUMENT)
+            result.extend(chunk)
+
+    tasks = [
+        asyncio.create_task(send_input()),
+        asyncio.create_task(receive_output()),
+        asyncio.create_task(process.wait()),
+    ]
+    try:
+        values = await asyncio.gather(*tasks)
+        return values[1]
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _render_pdf_pages_with_budget(
+    content: bytes, timeout_seconds: float
+) -> tuple[bytes, ...]:
+    if not _PDF_ADMISSION.acquire(blocking=False):
+        raise PdfParserBusyError("pdf_parser_overloaded")
+    process: asyncio.subprocess.Process | None = None
+    try:
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-I",
+            str(_PDF_RENDER_WORKER_PATH),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            env={"LANG": "C.UTF-8"},
+        )
+        stdout = await asyncio.wait_for(
+            _communicate_render_worker(process, content), timeout=timeout_seconds
+        )
+    except BaseException:
+        if process is not None and process.returncode is None:
+            cleanup = asyncio.create_task(_terminate_pdf_worker(process))
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                await asyncio.shield(cleanup)
+        raise
+    finally:
+        _PDF_ADMISSION.release()
+
+    if process.returncode != 0:
+        raise DocumentStructureError(ExtractionWarning.MALFORMED_DOCUMENT)
+    try:
+        payload = json.loads(stdout)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise DocumentStructureError(ExtractionWarning.MALFORMED_DOCUMENT) from exc
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        raise DocumentStructureError(ExtractionWarning.MALFORMED_DOCUMENT)
+    if payload.get("status") == "error":
+        warning = payload.get("warning")
+        allowed = {
+            warning.value: warning
+            for warning in (
+                ExtractionWarning.MALFORMED_DOCUMENT,
+                ExtractionWarning.ENCRYPTED_DOCUMENT,
+                ExtractionWarning.PAGE_LIMIT_EXCEEDED,
+            )
+        }
+        raise DocumentStructureError(
+            allowed.get(warning, ExtractionWarning.MALFORMED_DOCUMENT)
+            if isinstance(warning, str)
+            else ExtractionWarning.MALFORMED_DOCUMENT
+        )
+    pages = payload.get("pages")
+    count = payload.get("page_count")
+    if (
+        payload.get("status") != "ok"
+        or not isinstance(pages, list)
+        or not 1 <= len(pages) <= MAX_RENDERED_PDF_PAGES
+        or isinstance(count, bool)
+        or not isinstance(count, int)
+        or count != len(pages)
+    ):
+        raise DocumentStructureError(ExtractionWarning.MALFORMED_DOCUMENT)
+    decoded: list[bytes] = []
+    total_bytes = 0
+    for value in pages:
+        try:
+            if not isinstance(value, str):
+                raise ValueError("invalid_png")
+            png = base64.b64decode(value, validate=True)
+            if (
+                not 33 <= len(png) <= MAX_PDF_PAGE_PNG_BYTES
+                or png[:8] != b"\x89PNG\r\n\x1a\n"
+                or png[8:16] != b"\x00\x00\x00\rIHDR"
+            ):
+                raise ValueError("invalid_png")
+            width, height = struct.unpack("!II", png[16:24])
+            if (
+                not 1 <= width <= MAX_PDF_PAGE_DIMENSION
+                or not 1 <= height <= MAX_PDF_PAGE_DIMENSION
+                or width * height > MAX_PDF_PAGE_PIXELS
+            ):
+                raise ValueError("invalid_png_dimensions")
+        except (ValueError, binascii.Error) as exc:
+            raise DocumentStructureError(ExtractionWarning.MALFORMED_DOCUMENT) from exc
+        total_bytes += len(png)
+        if total_bytes > MAX_PDF_TOTAL_PNG_BYTES:
+            raise DocumentStructureError(ExtractionWarning.MALFORMED_DOCUMENT)
+        decoded.append(png)
+    return tuple(decoded)
+
+
 def _quality(
     *,
     assessment: QualityAssessment,
@@ -671,22 +815,20 @@ def _validate_embedding(value: object) -> tuple[float, ...] | None:
     if not isinstance(value, (list, tuple)) or len(value) != EMBEDDING_DIMENSIONS:
         return None
     embedding: list[float] = []
-    has_nonzero_float32 = False
+    has_nonzero_float16 = False
     for item in value:
         if isinstance(item, bool) or not isinstance(item, (int, float)):
             return None
-        number = float(item)
-        if not math.isfinite(number):
-            return None
         try:
-            float32 = struct.unpack("!f", struct.pack("!f", number))[0]
+            number = float(item)
         except OverflowError:
             return None
-        if not math.isfinite(float32):
+        if not math.isfinite(number) or abs(number) > EMBEDDING_MAX_ABS_COMPONENT:
             return None
-        has_nonzero_float32 = has_nonzero_float32 or float32 != 0.0
+        float16 = struct.unpack("!e", struct.pack("!e", number))[0]
+        has_nonzero_float16 = has_nonzero_float16 or float16 != 0.0
         embedding.append(number)
-    return tuple(embedding) if has_nonzero_float32 else None
+    return tuple(embedding) if has_nonzero_float16 else None
 
 
 class DocumentExtractionService:
@@ -718,26 +860,16 @@ class DocumentExtractionService:
                 mock=True,
             )
 
-        # PDF text objects are not proof that text is visible: off-page, clipped,
-        # transparent, or occluded text can still be returned by pypdf. Until PDFs
-        # are rasterized in the isolated worker and OCR receives only those pixels,
-        # accepting either parser or provider text would make hidden content
-        # scoreable. Keep the externally reachable path fail-closed.
-        if normalized_mime == "application/pdf":
-            raise UploadValidationError("pdf_visual_validation_unavailable", 503)
-
         page_count = 1
         extraction_method = ExtractionMethod.GEMINI_VISION
         model_id: str | None = None
         warnings: list[ExtractionWarning] = []
         source_blocks: tuple[SourceBlock, ...] = ()
-        text = ""
-
+        page_images = (content,)
         if normalized_mime == "application/pdf":
             try:
-                pages, page_count, pages_requiring_ocr = await _read_pdf_pages_with_budget(
-                    content,
-                    self._pdf_text_timeout_seconds,
+                page_images = await _render_pdf_pages_with_budget(
+                    content, self._pdf_text_timeout_seconds
                 )
             except TimeoutError:
                 return _unusable_result(
@@ -757,56 +889,26 @@ class DocumentExtractionService:
                     warning=exc.warning,
                     reason=exc.reason,
                 )
+            page_count = len(page_images)
+            warnings.append(ExtractionWarning.OCR_REQUIRED)
 
-            page_assessments = tuple(assess_extracted_text(page) for page in pages)
-            deterministic_text = "\n\n".join(page for page in pages if page)
-            document_assessment = assess_extracted_text(deterministic_text)
-            malformed_assessment = next(
-                (
-                    assessment
-                    for assessment in (*page_assessments, document_assessment)
-                    if assessment.warning is ExtractionWarning.MALFORMED_EXTRACTION
-                ),
-                None,
+        if self._provider is None:
+            return _unusable_result(
+                content_hash=content_hash,
+                warning=ExtractionWarning.PROVIDER_UNAVAILABLE,
+                reason=QualityReason.NO_SOURCE_BLOCKS,
             )
-            if malformed_assessment is not None:
-                return _unusable_result(
-                    content_hash=content_hash,
-                    warning=ExtractionWarning.MALFORMED_EXTRACTION,
-                    reason=malformed_assessment.reasons[0],
-                )
-            # A document-wide text threshold can hide image-only pages in a mixed PDF.
-            # Use deterministic extraction only when every page has usable text.
-            if (
-                not any(pages_requiring_ocr)
-                and document_assessment.usable
-                and all(assessment.usable for assessment in page_assessments)
-            ):
-                source_blocks = _build_blocks_from_pages(pages, content_hash=content_hash)
-                if len(source_blocks) > MAX_SOURCE_BLOCKS:
-                    source_blocks = build_source_blocks(
-                        document_assessment.text,
-                        content_hash=content_hash,
-                        page_number=None,
-                    )
-                if source_blocks:
-                    text = "\n\n".join(block.text for block in source_blocks)
-                    extraction_method = ExtractionMethod.PDF_TEXT
-                    model_id = f"pypdf-{pypdf.__version__}"
-            if not text:
-                warnings.append(ExtractionWarning.OCR_REQUIRED)
-
-        if not text:
-            if self._provider is None:
-                return _unusable_result(
-                    content_hash=content_hash,
-                    warning=ExtractionWarning.PROVIDER_UNAVAILABLE,
-                    reason=QualityReason.NO_SOURCE_BLOCKS,
-                )
+        # A single deadline covers every page, not one fresh timeout per page.
+        deadline = asyncio.get_running_loop().time() + self._ocr_timeout_seconds
+        page_texts: list[str] = []
+        for page_image in page_images:
             try:
                 provider_output = await asyncio.wait_for(
-                    self._provider.extract_text(content, normalized_mime),
-                    timeout=self._ocr_timeout_seconds,
+                    self._provider.extract_text(
+                        page_image,
+                        "image/png" if normalized_mime == "application/pdf" else normalized_mime,
+                    ),
+                    timeout=max(0, deadline - asyncio.get_running_loop().time()),
                 )
             except TimeoutError:
                 return _unusable_result(
@@ -824,6 +926,7 @@ class DocumentExtractionService:
             provider_text = getattr(provider_output, "text", None)
             provider_model_id = getattr(provider_output, "model_id", None)
             provider_finish_reason = getattr(provider_output, "finish_reason", None)
+            provider_method = getattr(provider_output, "extraction_method", None)
             if provider_finish_reason != "STOP":
                 return _unusable_result(
                     content_hash=content_hash,
@@ -831,44 +934,59 @@ class DocumentExtractionService:
                     reason=QualityReason.NO_SOURCE_BLOCKS,
                 )
             assessment = assess_extracted_text(provider_text)
-            if not assessment.usable:
-                warning = assessment.warning or ExtractionWarning.MALFORMED_EXTRACTION
+            # Successfully scanned blank/short pages are allowed in a multi-page
+            # document. Malformed output on any page invalidates the whole file.
+            if assessment.warning is ExtractionWarning.MALFORMED_EXTRACTION:
                 return _unusable_result(
                     content_hash=content_hash,
-                    warning=warning,
+                    warning=ExtractionWarning.MALFORMED_EXTRACTION,
                     reason=assessment.reasons[0],
                 )
-            if not isinstance(provider_model_id, str) or not _MODEL_ID_RE.fullmatch(
-                provider_model_id
+            if (
+                not isinstance(provider_model_id, str)
+                or not _MODEL_ID_RE.fullmatch(provider_model_id)
+                or provider_method
+                not in {ExtractionMethod.GEMINI_VISION, ExtractionMethod.GOOGLE_CLOUD_VISION}
+                or (
+                    model_id is not None
+                    and (model_id != provider_model_id or extraction_method != provider_method)
+                )
             ):
                 return _unusable_result(
                     content_hash=content_hash,
                     warning=ExtractionWarning.MALFORMED_EXTRACTION,
                     reason=QualityReason.NO_SOURCE_BLOCKS,
                 )
-
-            block_page = 1 if page_count == 1 else None
-            try:
-                source_blocks = build_source_blocks(
-                    assessment.text,
-                    content_hash=content_hash,
-                    page_number=block_page,
-                )
-            except ValueError:
+            page_texts.append(assessment.text)
+            if sum(len(page) + 2 for page in page_texts) - 2 > MAX_EXTRACTED_CHARACTERS:
                 return _unusable_result(
                     content_hash=content_hash,
                     warning=ExtractionWarning.MALFORMED_EXTRACTION,
-                    reason=QualityReason.NO_SOURCE_BLOCKS,
+                    reason=QualityReason.TEXT_TOO_LARGE,
                 )
-            if not source_blocks:
-                return _unusable_result(
-                    content_hash=content_hash,
-                    warning=ExtractionWarning.MALFORMED_EXTRACTION,
-                    reason=QualityReason.NO_SOURCE_BLOCKS,
-                )
-            text = "\n\n".join(block.text for block in source_blocks)
-            extraction_method = ExtractionMethod.GEMINI_VISION
+            extraction_method = provider_method
             model_id = provider_model_id
+
+        document_assessment = assess_extracted_text(
+            "\n\n".join(page for page in page_texts if page)
+        )
+        if not document_assessment.usable:
+            return _unusable_result(
+                content_hash=content_hash,
+                warning=document_assessment.warning or ExtractionWarning.MALFORMED_EXTRACTION,
+                reason=document_assessment.reasons[0],
+            )
+        try:
+            source_blocks = _build_blocks_from_pages(tuple(page_texts), content_hash=content_hash)
+        except ValueError:
+            source_blocks = ()
+        if not source_blocks or len(source_blocks) > MAX_SOURCE_BLOCKS:
+            return _unusable_result(
+                content_hash=content_hash,
+                warning=ExtractionWarning.MALFORMED_EXTRACTION,
+                reason=QualityReason.NO_SOURCE_BLOCKS,
+            )
+        text = "\n\n".join(block.text for block in source_blocks)
 
         embedding: tuple[float, ...] | None = None
         if self._provider is not None:

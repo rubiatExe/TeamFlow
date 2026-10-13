@@ -1,5 +1,16 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { ParserOutput } from '@/lib/contracts/parser';
+import type { ApplicationCompleteness } from '../contracts/application-completeness.ts';
+import { loadApplicationCompleteness } from './application-completeness.ts';
+import {
+    buildApprovedCandidateScoreDetails,
+    type ApprovedCandidateScoreDetails,
+} from '../contracts/candidate-score.ts';
+import {
+    Agent1EvaluationSchema,
+    RoleScoringPolicySchema,
+    type RoleScoringPolicy,
+} from '../contracts/resume-review.ts';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -43,6 +54,7 @@ export interface CandidateRow {
     id?: string;
     merchant_id: string;
     job_id?: string;
+    job_title?: string;
     name: string;
     email?: string;
     phone?: string;
@@ -50,13 +62,15 @@ export interface CandidateRow {
     status: string;
     resume_url: string;
     resume_text?: string;  // raw markdown from the document processor
-    fit_score?: number;
+    fit_score?: number | null;
     analysis?: CandidateAnalysis;
+    approved_score?: ApprovedCandidateScoreDetails;
+    application?: ApplicationCompleteness;
     red_flags?: string[];
     summary?: string;
     source: string;
-    // pgvector: 768-dim document embedding for semantic search
-    // Supabase accepts this as a plain number[] and stores it in the vector(768) column
+    // pgvector halfvec: 3072-dim document embedding for semantic search
+    // Supabase accepts this as a plain number[] and stores it in the halfvec(3072) column
     embedding?: number[];
 }
 
@@ -67,10 +81,18 @@ export class CandidateReviewRequiredError extends Error {
     }
 }
 
+export class CandidateLoadError extends Error {
+    constructor() {
+        super('Saved applicants could not be loaded.');
+        this.name = 'CandidateLoadError';
+    }
+}
+
 export function assertCandidateHasNoUnreviewedScore(candidate: CandidateRow): void {
     if (
         candidate.fit_score !== undefined
         || candidate.analysis !== undefined
+        || candidate.approved_score !== undefined
         || candidate.red_flags !== undefined
     ) {
         throw new CandidateReviewRequiredError();
@@ -165,16 +187,17 @@ export async function loadCandidatesFromSupabase(merchantId: string): Promise<Ca
         // We are on the client; call our secure proxy API instead of hitting Supabase RLS directly
         try {
             const res = await fetch(`/api/candidates?merchant_id=${merchantId}`);
-            if (!res.ok) return [];
-            return await res.json();
-        } catch (e) {
-            console.error('[Supabase Proxy] Load failed:', e);
-            return [];
+            if (!res.ok) throw new CandidateLoadError();
+            const candidates: unknown = await res.json();
+            if (!Array.isArray(candidates)) throw new CandidateLoadError();
+            return candidates as CandidateRow[];
+        } catch {
+            throw new CandidateLoadError();
         }
     }
 
     const db = getSupabase();
-    if (!db) return [];
+    if (!db) throw new CandidateLoadError();
 
     try {
         const { data, error } = await db
@@ -184,13 +207,85 @@ export async function loadCandidatesFromSupabase(merchantId: string): Promise<Ca
             .order('created_at', { ascending: false });
 
         if (error) {
-            console.error('[Supabase] Error loading candidates:', error);
-            return [];
+            console.error('[Supabase] Candidate load failed', {
+                code: typeof error.code === 'string' ? error.code.slice(0, 80) : 'unknown',
+            });
+            throw new CandidateLoadError();
         }
-        return data || [];
+        const candidates = (data || []) as CandidateRow[];
+        const applicationPromise = loadApplicationCompleteness(db, candidates);
+        const evaluations = candidates.map(candidate => ({
+            candidate,
+            evaluation: Agent1EvaluationSchema.safeParse(candidate.analysis),
+        }));
+        const roleIds = Array.from(new Set(evaluations.flatMap(({ candidate, evaluation }) => [
+            ...(candidate.job_id ? [candidate.job_id] : []),
+            ...(evaluation.success
+                ? evaluation.data.ranked_roles.map(role => role.role_id)
+                : []),
+        ])));
+        if (roleIds.length === 0) {
+            const applications = await applicationPromise;
+            return candidates.map(candidate => ({ ...candidate, application: applications.get(candidate.id || '') }));
+        }
+
+        const { data: jobRows, error: jobsError } = await db
+            .from('jobs')
+            .select('id,title,scoring_policy_id,scoring_policy_version,scoring_criteria')
+            .eq('merchant_id', merchantId)
+            .in('id', roleIds);
+        if (jobsError) {
+            console.error('[Supabase] Candidate score policy load failed', {
+                code: typeof jobsError.code === 'string' ? jobsError.code.slice(0, 80) : 'unknown',
+            });
+            const applications = await applicationPromise;
+            return candidates.map(candidate => ({ ...candidate, application: applications.get(candidate.id || '') }));
+        }
+
+        const policyByRole = new Map<string, RoleScoringPolicy>();
+        const jobTitleByRole = new Map<string, string>();
+        for (const row of jobRows || []) {
+            if (typeof row.title === 'string') jobTitleByRole.set(row.id, row.title);
+            const parsed = RoleScoringPolicySchema.safeParse({
+                schema_version: '1.0',
+                role_id: row.id,
+                role_title: row.title,
+                policy_identity: {
+                    policy_id: row.scoring_policy_id,
+                    policy_version: row.scoring_policy_version,
+                },
+                criteria: row.scoring_criteria,
+            });
+            if (parsed.success) policyByRole.set(parsed.data.role_id, parsed.data);
+        }
+
+        const applications = await applicationPromise;
+        return evaluations.map(({ candidate, evaluation }) => {
+            const titledCandidate = {
+                ...candidate,
+                application: applications.get(candidate.id || ''),
+                job_title: candidate.job_id ? jobTitleByRole.get(candidate.job_id) : undefined,
+            };
+            if (!evaluation.success) return titledCandidate;
+            const policies = evaluation.data.ranked_roles
+                .map(role => policyByRole.get(role.role_id))
+                .filter((policy): policy is RoleScoringPolicy => Boolean(policy));
+            const approvedScore = buildApprovedCandidateScoreDetails(
+                evaluation.data,
+                policies,
+                candidate.fit_score,
+            );
+            return approvedScore
+                ? { ...titledCandidate, approved_score: approvedScore }
+                : titledCandidate;
+        });
     } catch (err) {
-        console.error('[Supabase] Unexpected error:', err);
-        return [];
+        if (!(err instanceof CandidateLoadError)) {
+            console.error('[Supabase] Unexpected candidate load failure', {
+                errorType: err instanceof Error ? err.name : 'UnknownError',
+            });
+        }
+        throw new CandidateLoadError();
     }
 }
 

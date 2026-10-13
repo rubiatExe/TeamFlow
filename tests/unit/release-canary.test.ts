@@ -90,8 +90,8 @@ test('document processor exercises authenticated OCR and embedding before promot
   assert.match(canary, /OCR_SERVICE_TOKEN_SECRET_VERSION/u);
   assert.match(canary, /\$CANDIDATE_URL\/extract/u);
   assert.match(canary, /scanned-resume\.pdf/u);
-  assert.match(canary, /\.extraction_method == "gemini_vision"/u);
-  assert.match(canary, /\.embedding \| length == 768/u);
+  assert.match(canary, /\.extraction_method == "google_cloud_vision"/u);
+  assert.match(canary, /\.embedding \| length == 3072/u);
   assert.doesNotMatch(canary, /versions access latest/u);
 });
 

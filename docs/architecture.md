@@ -162,12 +162,15 @@ The LangGraph service is not part of resume upload. If it is unavailable, manage
 | GitHub → Google Cloud | `WIF_PROVIDER`, `WIF_SERVICE_ACCOUNT`, `permissions.id-token: write` |
 | Cloud Run deployment | Services `teamflow-python-service` and `teamflow-hiring-agent`, region `us-central1` |
 
-Repository model defaults, embedding task types, and the 768-dimensional storage
+Repository model defaults, embedding task types, and the 3072-dimensional storage
 contract are recorded in [`config/ai-model-contract.json`](../config/ai-model-contract.json).
 The scorer and hiring-agent model identifiers retain their existing environment
 overrides, while the shared embedding model stays fixed. The command
 `npm run verify:model-contract` prevents checked-in services, workflows, schema, and
 named active documentation from silently drifting apart.
+
+Existing deployments need the [3,072-dimension migration and backfill](embedding-migration.md)
+before the updated services can store or search candidate embeddings.
 
 ## Supabase boundary
 

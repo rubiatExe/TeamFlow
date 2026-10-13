@@ -11,6 +11,7 @@ import {
   ResumeReviewRunStatusSchema,
   StartResumeReviewRunRequestSchema,
 } from '../../lib/contracts/resume-review-hitl.ts';
+import { summarizeWeightedScore } from '../../lib/domain/scoring-policy.ts';
 
 const payload: unknown = JSON.parse(readFileSync(
   new URL('../fixtures/resume-review-hitl-v2.json', import.meta.url),
@@ -51,6 +52,50 @@ test('validates the bounded reviewer detail and queue projections', () => {
     detail.proposal.criterion_details[0]?.evidence_snippets[0],
     detail.proposal.editable_agent1_output.role_assessments[0]
       ?.criterion_assessments[0]?.evidence[0],
+  );
+});
+
+test('binds the top score to its role policy and weighted criteria', () => {
+  const fixture = reviewerPayload as Record<string, unknown>;
+  const detail = ResumeReviewRunDetailResponseSchema.parse(fixture.detail_response);
+  const topRole = detail.proposal.roles[0];
+  const summary = summarizeWeightedScore(detail.proposal.criterion_details);
+
+  assert.equal(topRole?.role_id, detail.proposal.top_role_id);
+  assert.deepEqual(topRole?.scoring_policy, {
+    policy_id: 'shift-lead-score-policy',
+    policy_version: '1.0.0',
+  });
+  assert.equal(summary.totalWeight, 100);
+  assert.equal(summary.earnedPoints, topRole?.deterministic_score);
+
+  if (!topRole) throw new Error('fixture must have a top role');
+  const wrongScore = {
+    ...detail,
+    proposal: {
+      ...detail.proposal,
+      roles: [
+        { ...topRole, deterministic_score: topRole.deterministic_score - 1 },
+        ...detail.proposal.roles.slice(1),
+      ],
+    },
+  };
+  assert.equal(ResumeReviewRunDetailResponseSchema.safeParse(wrongScore).success, false);
+
+  const wrongCriterionRole = {
+    ...detail,
+    proposal: {
+      ...detail.proposal,
+      criterion_details: detail.proposal.criterion_details.map((criterion, index) => (
+        index === 0
+          ? { ...criterion, role_id: detail.proposal.roles[1]?.role_id }
+          : criterion
+      )),
+    },
+  };
+  assert.equal(
+    ResumeReviewRunDetailResponseSchema.safeParse(wrongCriterionRole).success,
+    false,
   );
 });
 

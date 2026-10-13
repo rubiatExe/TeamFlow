@@ -1,6 +1,8 @@
 {
   "schemaVersion": 1,
   "documentOcr": {
+    "provider": "google_cloud_vision",
+    "visionModel": "google-cloud-vision-v1/builtin-stable",
     "models": [
       "gemini-3.1-pro-preview"
     ]
@@ -15,7 +17,7 @@
   },
   "embedding": {
     "apiModel": "models/gemini-embedding-001",
-    "dimensions": 768,
+    "dimensions": 3072,
     "documentTask": "RETRIEVAL_DOCUMENT",
     "queryTask": "RETRIEVAL_QUERY"
   }

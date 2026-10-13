@@ -1,6 +1,6 @@
 'use client';
 
-import { Search, Settings, Upload, Users } from 'lucide-react';
+import { ClipboardCheck, Search, Settings, Upload, Users } from 'lucide-react';
 
 import type { DashboardTab } from '@/components/layout/main-tabs';
 
@@ -17,11 +17,12 @@ export function BottomNav({ activeTab, settingsOpen, onTabChange, onSettings, se
     { id: 'candidates' as const, label: 'Candidates', icon: Users },
     { id: 'upload' as const, label: 'Upload', icon: Upload },
     { id: 'search' as const, label: 'Search', icon: Search },
+    { id: 'review' as const, label: 'Review', icon: ClipboardCheck },
   ];
 
   return (
     <nav aria-label="Mobile hiring workspace" className="fixed inset-x-0 bottom-0 z-50 border-t border-[var(--cocoa-200)] bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
-      <div className="grid h-16 grid-cols-4">
+      <div className="grid h-16 grid-cols-5">
         {items.map(item => {
           const active = activeTab === item.id && !settingsOpen;
           const Icon = item.icon;

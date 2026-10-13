@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import type { CandidateStatus, CandidateWithStatus } from '../contracts/candidate.ts';
 import { SYNTHETIC_CANDIDATE_CORPUS } from './demo-semantic-search-data.ts';
+import { getDemoScoreDetails } from './demo-scoring.ts';
 import { CAFE_ROLES, getRoleOrDefault } from './roles.ts';
 
 export interface HiringPersona {
@@ -49,27 +50,30 @@ const INITIAL_STAGES: Record<string, CandidateStatus> = {
 };
 
 export function createDemoCandidates(): CandidateWithStatus[] {
-  return SYNTHETIC_CANDIDATE_CORPUS.map(profile => ({
-    id: profile.candidateRef,
-    status: INITIAL_STAGES[profile.candidateRef] ?? 'new',
-    data: {
-      candidate: {
-        name: profile.displayName,
-        city: profile.location,
-        skills: [...profile.skills],
-        experience_years: profile.yearsExperience,
-        applied_role: profile.roleId,
+  return SYNTHETIC_CANDIDATE_CORPUS.map(profile => {
+    const samplePolicy = getDemoScoreDetails(profile.candidateRef);
+    return {
+      id: profile.candidateRef,
+      status: INITIAL_STAGES[profile.candidateRef] ?? 'new',
+      data: {
+        candidate: {
+          name: profile.displayName,
+          city: profile.location,
+          skills: [...profile.skills],
+          experience_years: profile.yearsExperience,
+          applied_role: profile.roleId,
+        },
+        score: {
+          total: samplePolicy.score,
+          calculation: 'sample_policy',
+          sample_policy: samplePolicy,
+          breakdown: { constraints: 0, experience: 0, logistics: 0 },
+          explanation: 'Illustrative sample score from fictional source evidence. This is not an approved hiring score. Met criteria earn their full weight; missing evidence earns 0 points and remains unknown.',
+        },
+        red_flags: [],
       },
-      // Preserve the connected-candidate contract without inventing a sample fit score.
-      // Synthetic cards, statistics, sorting, and filters never present this placeholder.
-      score: {
-        total: 0,
-        breakdown: { constraints: 0, experience: 0, logistics: 0 },
-        explanation: 'Fictional profile. Review its source evidence in Smart Search.',
-      },
-      red_flags: [],
-    },
-  }));
+    };
+  });
 }
 
 const criterionSchema = z.string().trim().min(1).max(200);

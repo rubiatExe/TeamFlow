@@ -42,6 +42,16 @@ test('candidate creation rejects unreviewed model red flags', () => {
   );
 });
 
+test('candidate creation rejects a forged approved-score projection', () => {
+  assert.throws(
+    () => assertCandidateHasNoUnreviewedScore({
+      ...baseCandidate,
+      approved_score: {} as CandidateRow['approved_score'],
+    }),
+    CandidateReviewRequiredError,
+  );
+});
+
 test('candidate identity and document metadata can be created before review', () => {
   assert.doesNotThrow(() => assertCandidateHasNoUnreviewedScore(baseCandidate));
 });

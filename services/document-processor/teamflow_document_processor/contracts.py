@@ -19,7 +19,8 @@ from pydantic import (
 )
 
 SCHEMA_VERSION = "1.0"
-EMBEDDING_DIMENSIONS = 768
+EMBEDDING_DIMENSIONS = 3072
+EMBEDDING_MAX_ABS_COMPONENT = 65_504.0
 MAX_EXTRACTED_CHARACTERS = 100_000
 MAX_SOURCE_BLOCK_CHARACTERS = 4_000
 _DOCUMENT_ID_RE = re.compile(r"^doc-([0-9a-f]{64})$")
@@ -59,12 +60,8 @@ def _normalize_finite_number(value: object) -> float:
         raise ValueError("embedding value must be finite") from exc
     if not math.isfinite(number):
         raise ValueError("embedding value must be finite")
-    try:
-        float32 = struct.unpack("!f", struct.pack("!f", number))[0]
-    except OverflowError as exc:
-        raise ValueError("embedding value must be representable as float32") from exc
-    if not math.isfinite(float32):
-        raise ValueError("embedding value must be representable as finite float32")
+    if abs(number) > EMBEDDING_MAX_ABS_COMPONENT:
+        raise ValueError("embedding value must be representable as finite float16")
     return number
 
 
@@ -102,6 +99,7 @@ class ExtractionStatus(str, Enum):
 class ExtractionMethod(str, Enum):
     PDF_TEXT = "pdf_text"
     GEMINI_VISION = "gemini_vision"
+    GOOGLE_CLOUD_VISION = "google_cloud_vision"
     NONE = "none"
     MOCK = "mock"
 
@@ -247,11 +245,12 @@ class DocumentExtractionResult(StrictModel):
 
         if self.embedding is not None:
             if len(self.embedding) != EMBEDDING_DIMENSIONS:
-                raise ValueError("embedding must contain exactly 768 values")
+                raise ValueError(f"embedding must contain exactly {EMBEDDING_DIMENSIONS} values")
             if any(isinstance(value, bool) or not math.isfinite(value) for value in self.embedding):
                 raise ValueError("embedding values must be finite numbers")
+            # The database stores halfvec values; cosine search cannot index a zero vector.
             if not any(
-                struct.unpack("!f", struct.pack("!f", value))[0] != 0.0 for value in self.embedding
+                struct.unpack("!e", struct.pack("!e", value))[0] != 0.0 for value in self.embedding
             ):
                 raise ValueError("embedding must not collapse to a zero vector")
             if self.embedding_model_id is None:
@@ -287,6 +286,7 @@ class DocumentExtractionResult(StrictModel):
         if self.extraction_method not in {
             ExtractionMethod.PDF_TEXT,
             ExtractionMethod.GEMINI_VISION,
+            ExtractionMethod.GOOGLE_CLOUD_VISION,
         }:
             raise ValueError("usable extraction requires a real extraction method")
         if self.model_id is None:

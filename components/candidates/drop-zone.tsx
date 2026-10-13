@@ -178,10 +178,10 @@ export function DropZone({ onFileProcessed, onViewCandidates, roleId, disabled =
         onDragOver={event => { event.preventDefault(); if (!disabled) setIsDragging(true); }}
         onDragLeave={() => setIsDragging(false)}
         aria-busy={uploadingCount > 0}
-        className={`flex min-h-[280px] flex-col items-center justify-center rounded-[var(--radius-lg)] border-2 p-6 text-center transition-all ${
+        className={`flex min-h-[300px] flex-col items-center justify-center rounded-[var(--radius-xl)] border-2 p-8 text-center transition-all duration-200 ${
           isDragging
-            ? 'border-solid border-[var(--cocoa-600)] bg-[var(--cocoa-100)]'
-            : 'border-dashed border-[var(--cocoa-300)] bg-[var(--cocoa-50)]'
+            ? 'scale-[1.01] border-solid border-[var(--cocoa-600)] bg-[var(--cocoa-100)] shadow-[var(--shadow-card-hover)]'
+            : 'border-dashed border-[var(--cocoa-300)] bg-gradient-to-b from-white to-[var(--cocoa-50)] hover:border-[var(--cocoa-500)] hover:shadow-[var(--shadow-card)]'
         } ${disabled ? 'cursor-not-allowed opacity-70' : ''}`}
       >
         <input
@@ -210,14 +210,14 @@ export function DropZone({ onFileProcessed, onViewCandidates, roleId, disabled =
           <span className="md:hidden">Tap to choose résumés</span>
           <span className="hidden md:inline">Drop résumés here</span>
         </h3>
-        <p id={helpId} className="mt-2 text-sm text-[var(--cocoa-600)]">PDF, JPG, PNG · Max 10MB each</p>
+        <p id={helpId} className="mt-2 text-sm text-[var(--cocoa-600)]">PDF, JPG, PNG · Max 10MB each · PDFs up to 5 pages</p>
         {disabled ? (
           <p className="mt-4 max-w-sm text-sm leading-6 text-[var(--cocoa-700)]">Résumé processing is disabled in the public preview.</p>
         ) : (
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            className="mt-5 min-h-11 rounded-[var(--radius-md)] border border-[var(--cocoa-700)] bg-white px-5 text-sm font-semibold text-[var(--cocoa-700)] transition hover:bg-[var(--cocoa-100)]"
+            className="btn-primary mt-5 min-h-11 rounded-[var(--radius-md)] px-6 text-sm font-semibold text-white"
           >
             Browse files
           </button>

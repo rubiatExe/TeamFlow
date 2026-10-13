@@ -133,6 +133,12 @@ test('the Cocoa dashboard keeps public mutations gated and its manager controls 
   assert.match(card, /role="menuitem"/u);
   assert.match(scoreRing, /Fit score: \$\{boundedScore\}\. Click to see breakdown\./u);
   assert.match(scoreRing, /aria-expanded=\{expanded\}/u);
+  assert.match(card, /Approved weighted score/u);
+  assert.match(card, /Policy score/u);
+  assert.match(card, /Legacy preview/u);
+  assert.match(card, /weightedPolicy\.policy_id/u);
+  assert.match(card, /scoreCriterion\(criterion\)/u);
+  assert.match(card, /No breakdown is shown/u);
   assert.doesNotMatch(card, /candidateEmail:/u);
 });
 
@@ -173,7 +179,10 @@ test('the unified dashboard embeds an accessible evidence-led Smart Search', () 
   assert.match(page, /Skip to main content/u);
   assert.match(dashboard, /<SmartSearchTab debugMode=\{debugMode\}/u);
   assert.match(smartSearch, /<h2 id="smart-search-tab-title"/u);
-  assert.match(smartSearch, /respects the current board filters\. Each result includes quoted résumé evidence/u);
+  assert.match(smartSearch, /respects the board filters/u);
+  assert.match(smartSearch, /criteria you approve/u);
+  assert.match(smartSearch, /aria-pressed=\{view === option\}/u);
+  assert.match(search, /Build criteria from this request/u);
   assert.match(smartSearch, /candidateRefs=\{candidateRefs\}/u);
   assert.match(dashboard, /roleId=\{selectedRoleId\} candidateRefs=\{searchCandidateRefs\}/u);
 

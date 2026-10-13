@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
 
 import { z } from 'zod';
+import { EmbeddingSchema } from './embedding.ts';
+
+export { EMBEDDING_DIMENSIONS as DOCUMENT_EMBEDDING_DIMENSIONS } from './embedding.ts';
 
 export const DOCUMENT_EXTRACTION_SCHEMA_VERSION = '1.0' as const;
-export const DOCUMENT_EMBEDDING_DIMENSIONS = 768;
 
 const MAX_DOCUMENT_TEXT_CODE_POINTS = 100_000;
 const MAX_SOURCE_BLOCK_TEXT_CODE_POINTS = 4_000;
@@ -69,6 +71,7 @@ export const ExtractionStatusSchema = z.enum([
 export const ExtractionMethodSchema = z.enum([
   'pdf_text',
   'gemini_vision',
+  'google_cloud_vision',
   'none',
   'mock',
 ]);
@@ -165,24 +168,6 @@ export const ExtractionQualitySchema = z.object({
 });
 
 const nullableModelId = nonBlankText(200).regex(modelIdPattern).nullable();
-const EmbeddingSchema = z.array(z.number().finite())
-  .length(DOCUMENT_EMBEDDING_DIMENSIONS)
-  .superRefine((embedding, context) => {
-    const float32Values = embedding.map(value => Math.fround(value));
-    if (float32Values.some(value => !Number.isFinite(value))) {
-      context.addIssue({
-        code: 'custom',
-        message: 'embedding values must be representable as finite float32 values',
-      });
-    }
-    if (!float32Values.some(value => value !== 0)) {
-      context.addIssue({
-        code: 'custom',
-        message: 'embedding must not collapse to a zero vector',
-      });
-    }
-  });
-
 export const DocumentExtractionResultSchema = z.object({
   schema_version: z.literal(DOCUMENT_EXTRACTION_SCHEMA_VERSION),
   document_id: z.string().regex(documentIdPattern),
@@ -346,7 +331,8 @@ export const DocumentExtractionResultSchema = z.object({
       });
     }
     if (result.extraction_method !== 'pdf_text'
-      && result.extraction_method !== 'gemini_vision') {
+      && result.extraction_method !== 'gemini_vision'
+      && result.extraction_method !== 'google_cloud_vision') {
       context.addIssue({
         code: 'custom',
         path: ['extraction_method'],

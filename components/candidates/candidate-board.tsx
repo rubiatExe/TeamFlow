@@ -1,11 +1,13 @@
 'use client';
 
-import type { KeyboardEvent } from 'react';
+import { useId, type KeyboardEvent } from 'react';
 import { Inbox, Sparkles, UserCheck } from 'lucide-react';
 
 import { CandidateCard, type CandidateActionResult } from '@/components/candidates/candidate-card';
 import type { CandidateStatus, CandidateWithStatus } from '@/lib/contracts/candidate';
+import type { ManagerCriteriaCandidateResult } from '@/lib/contracts/manager-criteria';
 import { isDemoCandidateId } from '@/lib/domain/demo-workspace';
+import { compareCandidateScores } from '@/lib/domain/candidate-presentation';
 
 export type StageVisibility = {
   new: boolean;
@@ -18,6 +20,7 @@ interface CandidateBoardProps {
   sampleMode?: boolean;
   stageVisibility: StageVisibility;
   debugMode?: boolean;
+  addedAssessments?: Record<string, ManagerCriteriaCandidateResult>;
   onAdvance?: (candidateId: string, nextStatus: CandidateStatus) => Promise<CandidateActionResult> | CandidateActionResult;
   onStatusChange?: (candidateId: string, nextStatus: CandidateStatus) => Promise<void> | void;
   onRemove?: (candidateId: string) => Promise<void> | void;
@@ -82,11 +85,13 @@ export function CandidateBoard({
   sampleMode = false,
   stageVisibility,
   debugMode = false,
+  addedAssessments,
   onAdvance,
   onStatusChange,
   onRemove,
   onUpload,
 }: CandidateBoardProps) {
+  const boardId = useId();
   const visibleStatuses = new Set<CandidateStatus>([
     ...(stageVisibility.new ? (['pending', 'new'] as CandidateStatus[]) : []),
     ...(stageVisibility.invited ? (['invited'] as CandidateStatus[]) : []),
@@ -101,7 +106,7 @@ export function CandidateBoard({
       const rightDemo = isDemoCandidateId(right.id);
       if (leftDemo && rightDemo) return left.data.candidate.name.localeCompare(right.data.candidate.name);
       if (leftDemo !== rightDemo) return leftDemo ? 1 : -1;
-      return right.data.score.total - left.data.score.total;
+      return compareCandidateScores(left, right);
     });
 
   const handleLaneKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -124,14 +129,14 @@ export function CandidateBoard({
         return (
           <section
             key={lane.key}
-            aria-labelledby={`lane-${lane.key}`}
-            className={`min-w-0 rounded-[var(--radius-lg)] border border-[var(--cocoa-100)] border-l-4 ${lane.border} p-4 ${isHired ? 'hired-confetti-pattern' : 'bg-[var(--cocoa-50)]'}`}
+            aria-labelledby={`${boardId}-lane-${lane.key}`}
+            className={`min-w-0 p-4 border-l-4 ${lane.border} ${isHired ? 'hired-confetti-pattern rounded-[var(--radius-lg)] border border-[var(--sage-100)] shadow-[var(--shadow-card)]' : 'lane-surface'}`}
           >
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h3 id={`lane-${lane.key}`} className={`font-display text-base font-semibold ${isHired ? 'text-[var(--sage-700)]' : 'text-[var(--cocoa-800)]'}`}>
+              <h3 id={`${boardId}-lane-${lane.key}`} className={`font-display text-base font-semibold ${isHired ? 'text-[var(--sage-700)]' : 'text-[var(--cocoa-800)]'}`}>
                 <span aria-hidden="true">{lane.emoji}</span> {lane.label}
               </h3>
-              <span className="rounded-full border border-[var(--cocoa-200)] bg-white px-2.5 py-1 text-xs font-semibold text-[var(--cocoa-700)]">
+              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold tabular-nums text-[var(--cocoa-700)] shadow-sm ring-1 ring-[var(--cocoa-100)]">
                 {laneCandidates.length}
               </span>
             </div>
@@ -145,6 +150,7 @@ export function CandidateBoard({
                   status={candidate.status}
                   index={index}
                   debugMode={debugMode}
+                  addedAssessment={addedAssessments?.[candidate.id]}
                   onAdvance={onAdvance}
                   onStatusChange={onStatusChange}
                   onRemove={onRemove}

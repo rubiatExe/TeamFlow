@@ -99,11 +99,39 @@ def test_readiness_succeeds_only_for_real_initialized_dependencies(monkeypatch) 
     monkeypatch.setattr(service_main, "OCR_SERVICE_TOKEN", "service-token")
     monkeypatch.setattr(service_main, "ocr_genai_client", object())
     monkeypatch.setattr(service_main, "embedding_genai_client", object())
+    monkeypatch.setattr(service_main, "vision_client", object())
 
     response = TestClient(service_main.app).get("/ready")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ready"}
+
+
+def test_vision_readiness_fails_even_if_gemini_is_configured(monkeypatch) -> None:
+    monkeypatch.setattr(service_main, "MOCK_MODE", False)
+    monkeypatch.setattr(service_main, "OCR_PROVIDER", "google_cloud_vision")
+    monkeypatch.setattr(service_main, "OCR_SERVICE_TOKEN", "service-token")
+    monkeypatch.setattr(service_main, "ocr_genai_client", object())
+    monkeypatch.setattr(service_main, "embedding_genai_client", object())
+    monkeypatch.setattr(service_main, "vision_client", None)
+    assert TestClient(service_main.app).get("/ready").status_code == 503
+
+
+def test_explicit_legacy_gemini_provider_remains_supported(monkeypatch) -> None:
+    monkeypatch.setattr(service_main, "MOCK_MODE", False)
+    monkeypatch.setattr(service_main, "OCR_PROVIDER", "gemini")
+    monkeypatch.setattr(service_main, "OCR_SERVICE_TOKEN", "service-token")
+    monkeypatch.setattr(service_main, "ocr_genai_client", object())
+    monkeypatch.setattr(service_main, "embedding_genai_client", object())
+    monkeypatch.setattr(service_main, "vision_client", None)
+    assert TestClient(service_main.app).get("/ready").status_code == 200
+
+
+def test_ocr_provider_is_explicit_and_defaults_to_vision() -> None:
+    assert service_main._ocr_provider_setting({}) == "google_cloud_vision"
+    assert service_main._ocr_provider_setting({"OCR_PROVIDER": "gemini"}) == "gemini"
+    with pytest.raises(RuntimeError, match="OCR_PROVIDER_invalid"):
+        service_main._ocr_provider_setting({"OCR_PROVIDER": "unknown"})
 
 
 def test_production_readiness_rejects_a_weak_service_token(monkeypatch) -> None:

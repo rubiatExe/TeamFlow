@@ -21,6 +21,15 @@ from ..reliability import FailoverRunnable
 from .contracts import Agent1ModelOutput, Agent2QuestionPlan
 from .fingerprints import role_policy_fingerprint
 from .graph import ResumeReviewDependencies, build_resume_review_graph
+from .manager_criteria import (
+    ManagerCriteriaEvaluationRequest,
+    ManagerCriteriaEvaluationResponse,
+    ManagerCriteriaProposalDraft,
+    ManagerCriteriaProposalRequest,
+    ManagerCriteriaProposalResponse,
+    evaluate_manager_criteria,
+    generate_manager_criteria,
+)
 from .persistence import ReviewPersistenceRecord, build_review_persistence_record
 from .providers import (
     MCPActiveRoleLoader,
@@ -175,6 +184,85 @@ class LangGraphResumeReviewWorkflow:
             primary_model_name=settings.model,
             fallback_model_name=settings.fallback_model if fallback else None,
         )
+        self._manager_criteria_model = FailoverRunnable(
+            primary.with_structured_output(
+                schema=ManagerCriteriaProposalDraft,
+                method="json_schema",
+                include_raw=True,
+            ),
+            (
+                fallback.with_structured_output(
+                    schema=ManagerCriteriaProposalDraft,
+                    method="json_schema",
+                    include_raw=True,
+                )
+                if fallback
+                else None
+            ),
+            primary_model_name=settings.model,
+            fallback_model_name=settings.fallback_model if fallback else None,
+        )
+
+    async def _execute_manager_criteria(
+        self,
+        request: ManagerCriteriaProposalRequest | ManagerCriteriaEvaluationRequest,
+    ) -> ManagerCriteriaProposalResponse | ManagerCriteriaEvaluationResponse:
+        """Share concurrency and timeout budgets with the existing Agent 1 workflow."""
+
+        try:
+            if not isinstance(
+                request, ManagerCriteriaProposalRequest | ManagerCriteriaEvaluationRequest
+            ):
+                raise TypeError
+            validated = type(request).model_validate(request.model_dump(mode="python"))
+        except Exception:
+            raise ResumeReviewWorkflowRequestError("resume_review_request_invalid") from None
+        if validated.merchant_id != self._merchant_id:
+            raise ResumeReviewWorkflowRequestError("resume_review_tenant_scope_mismatch")
+        try:
+            await self._acquire()
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError:
+            raise ResumeReviewWorkflowBusyError("resume_review_workflow_busy") from None
+        try:
+            async with asyncio.timeout(self._settings.workflow_timeout_seconds):
+                if isinstance(validated, ManagerCriteriaProposalRequest):
+                    async with asyncio.timeout(self._settings.model_timeout_seconds):
+                        return await generate_manager_criteria(
+                            self._manager_criteria_model, validated
+                        )
+                async with self._tool_source.tools() as catalog:
+                    return await evaluate_manager_criteria(
+                        self._agent1_model,
+                        catalog,
+                        validated,
+                        model_timeout_seconds=self._settings.model_timeout_seconds,
+                    )
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError:
+            raise ResumeReviewWorkflowTimeoutError("resume_review_workflow_timeout") from None
+        except Exception:
+            raise ResumeReviewWorkflowExecutionError("resume_review_workflow_failed") from None
+        finally:
+            self._semaphore.release()
+
+    async def propose_manager_criteria(
+        self, request: ManagerCriteriaProposalRequest
+    ) -> ManagerCriteriaProposalResponse:
+        result = await self._execute_manager_criteria(request)
+        if not isinstance(result, ManagerCriteriaProposalResponse):
+            raise ResumeReviewWorkflowExecutionError("resume_review_result_invalid")
+        return result
+
+    async def evaluate_manager_criteria(
+        self, request: ManagerCriteriaEvaluationRequest
+    ) -> ManagerCriteriaEvaluationResponse:
+        result = await self._execute_manager_criteria(request)
+        if not isinstance(result, ManagerCriteriaEvaluationResponse):
+            raise ResumeReviewWorkflowExecutionError("resume_review_result_invalid")
+        return result
 
     async def _acquire(self) -> None:
         task = asyncio.create_task(self._semaphore.acquire())

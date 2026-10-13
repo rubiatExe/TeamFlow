@@ -245,6 +245,7 @@ jobs:
             --execution-environment=gen2 --service-account=${{ env.RUNTIME_SERVICE_ACCOUNT }}
           env_vars: |
             MOCK_MODE=False
+            OCR_PROVIDER=google_cloud_vision
             OCR_TIMEOUT_SECONDS=25
             EMBEDDING_TIMEOUT_SECONDS=10
             ENVIRONMENT=production
@@ -347,10 +348,10 @@ jobs:
             and .document_id == ("doc-" + $sha)
             and .status == "complete"
             and .mock == false
-            and .extraction_method == "gemini_vision"
+            and .extraction_method == "google_cloud_vision"
             and (.text | contains("Harbor Cafe"))
             and (.source_blocks | length > 0)
-            and (.embedding | length == 768)
+            and (.embedding | length == 3072)
           ' /tmp/candidate-extraction.json >/dev/null
 
       - name: Remove and verify candidate traffic tag

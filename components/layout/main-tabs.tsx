@@ -1,8 +1,8 @@
 'use client';
 
-import { Search, Upload, Users } from 'lucide-react';
+import { ClipboardCheck, Search, Upload, Users } from 'lucide-react';
 
-export type DashboardTab = 'candidates' | 'upload' | 'search';
+export type DashboardTab = 'candidates' | 'upload' | 'search' | 'review';
 
 interface MainTabsProps {
   activeTab: DashboardTab;
@@ -14,12 +14,13 @@ const TABS = [
   { id: 'candidates' as const, label: 'Candidates', icon: Users },
   { id: 'upload' as const, label: 'Upload Resumes', icon: Upload },
   { id: 'search' as const, label: 'Smart Search', icon: Search },
+  { id: 'review' as const, label: 'Review Queue', icon: ClipboardCheck },
 ];
 
 export function MainTabs({ activeTab, candidateCount, onTabChange }: MainTabsProps) {
   return (
-    <div className="hidden border-b border-[var(--cocoa-100)] md:block">
-      <div role="tablist" aria-label="Hiring workspace" className="flex items-end gap-6">
+    <div className="hidden pt-5 md:block">
+      <div role="tablist" aria-label="Hiring workspace" className="pill-tabs">
         {TABS.map(tab => {
           const active = activeTab === tab.id;
           const Icon = tab.icon;
@@ -32,10 +33,13 @@ export function MainTabs({ activeTab, candidateCount, onTabChange }: MainTabsPro
               aria-controls={`dashboard-panel-${tab.id}`}
               id={`dashboard-tab-${tab.id}`}
               onClick={() => onTabChange(tab.id)}
-              className={`relative flex min-h-14 items-center gap-2 border-b-[3px] px-1 text-sm transition-colors ${active ? 'border-[var(--cocoa-700)] font-semibold text-[var(--cocoa-800)]' : 'border-transparent text-[var(--cocoa-600)] hover:text-[var(--cocoa-800)]'}`}
+              className="pill-tab"
             >
               <Icon className="size-4" aria-hidden="true" />
-              {tab.label}{tab.id === 'candidates' ? ` (${candidateCount})` : ''}
+              {tab.label}
+              {tab.id === 'candidates' ? (
+                <span className={`rounded-full px-2 py-0.5 text-xs tabular-nums ${active ? 'bg-white/20 text-white' : 'bg-[var(--cocoa-100)] text-[var(--cocoa-700)]'}`}>{candidateCount}</span>
+              ) : null}
             </button>
           );
         })}
