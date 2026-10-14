@@ -34,10 +34,15 @@ role, reviewed answers, résumé hash, candidate, application, and consumed link
    unused private objects only after the invitation and signed upload token
    have expired; saved candidate and application references are protected.
 5. Provision Supabase Auth users and active `merchant_memberships` rows with
-   role `owner` or `manager` for the merchant that issues links.
+   role `owner` or `manager` for the merchant that issues links. The manager
+   sign-in screen uses an emailed one-time code, so the Supabase Auth email
+   template must include `{{ .Token }}`.
 
-The production manager dashboard still does not include an invitation screen.
-An authorized manager or backend can issue a link through this API:
+An authorized manager can sign in at `/manager/application-links`, choose one
+of their assigned workspaces, create a one-use link, and copy it for the
+candidate. The manager can review submitted applications at
+`/manager/applications` and open each verified private résumé through a
+short-lived read URL. The same link can be issued through this API:
 
 ```http
 POST /api/application/invitations
@@ -71,10 +76,10 @@ from storage.buckets where id = 'resumes';
 
 select
   has_function_privilege('service_role',
-    'public.teamflow_finalize_candidate_application(uuid,uuid,jsonb,text,text)',
+    'public.teamflow_finalize_candidate_application(uuid,uuid,jsonb,text,text,boolean)',
     'EXECUTE') as service_can_finalize,
   has_function_privilege('anon',
-    'public.teamflow_finalize_candidate_application(uuid,uuid,jsonb,text,text)',
+    'public.teamflow_finalize_candidate_application(uuid,uuid,jsonb,text,text,boolean)',
     'EXECUTE') as anonymous_can_finalize;
 ```
 

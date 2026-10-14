@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server.js';
 import { z } from 'zod';
 
-import { requestDocumentExtraction, type DocumentExtractionRequest } from '../../../lib/ai/document-processor-client.ts';
+import { type DocumentExtractionRequest } from '../../../lib/ai/document-processor-client.ts';
+import { requestResumePrefillExtraction } from '../../../lib/ai/resume-prefill-client.ts';
 import { MAX_DOCUMENT_BYTES, ParserInputSchema } from '../../../lib/contracts/parser.ts';
 import {
   finalizeProductionApplication,
@@ -66,7 +67,7 @@ const defaults: Dependencies = {
   finalizeApplication: finalizeProductionApplication,
   createSignedUpload: createSignedResumeUpload,
   downloadResume,
-  extractResume: requestDocumentExtraction,
+  extractResume: requestResumePrefillExtraction,
 };
 
 function json(body: unknown, status = 200): NextResponse {

@@ -76,6 +76,54 @@ export interface CreateProductionInvitationInput {
   ttlMinutes?: number;
 }
 
+export interface ProductionManagerMerchant {
+  id: string;
+  name: string;
+  role: 'owner' | 'manager';
+}
+
+/** Return only active workspaces where this verified Auth user can issue links. */
+export async function listProductionManagerMerchants(
+  actorUserId: string,
+): Promise<ProductionManagerMerchant[]> {
+  const db = getProductionClient();
+  if (!db || !isUuid(actorUserId)) {
+    throw new Error('Application invitation service is unavailable.');
+  }
+  const { data: memberships, error: membershipError } = await db
+    .from('merchant_memberships')
+    .select('merchant_id,role')
+    .eq('user_id', actorUserId)
+    .eq('status', 'active')
+    .in('role', ['owner', 'manager']);
+  if (membershipError || !memberships) {
+    throw new Error('Manager memberships could not be loaded.');
+  }
+  if (memberships.length === 0) return [];
+
+  const allowedRoles = new Map<string, 'owner' | 'manager'>();
+  for (const membership of memberships) {
+    if (typeof membership.merchant_id === 'string' && isUuid(membership.merchant_id)
+      && (membership.role === 'owner' || membership.role === 'manager')) {
+      allowedRoles.set(membership.merchant_id, membership.role);
+    }
+  }
+  if (allowedRoles.size === 0) return [];
+
+  const { data: merchants, error: merchantError } = await db
+    .from('merchants')
+    .select('id,store_name')
+    .in('id', [...allowedRoles.keys()]);
+  if (merchantError || !merchants) {
+    throw new Error('Manager workspaces could not be loaded.');
+  }
+  return merchants.flatMap(merchant => {
+    const role = allowedRoles.get(merchant.id);
+    if (!role || typeof merchant.store_name !== 'string') return [];
+    return [{ id: merchant.id, name: merchant.store_name, role }];
+  }).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export interface RegisterUploadGrantInput {
   storagePath: string;
   fileName: string;

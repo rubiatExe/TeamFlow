@@ -130,9 +130,7 @@ export async function deleteResume(path: string): Promise<boolean> {
   }
 }
 
-/**
- * Generates a signed URL for a private file (if we switch to private buckets later).
- */
+/** Generate a five-minute read URL for a private résumé after caller authorization. */
 export async function getSignedUrl(path: string): Promise<string | null> {
     if (!isSafeObjectPath(path)) return null;
     const supabase = getStorageClient();
