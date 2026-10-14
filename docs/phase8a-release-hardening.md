@@ -2,7 +2,7 @@
 
 Phase 8A prepares a fail-closed production release path without enabling the Phase 7 judge, automatic hiring decisions, or durable HITL writes. Repository controls are enforced by `npm run verify:release-hardening`. A live deployment is still blocked until the production resources below are provisioned and verified.
 
-Production eligibility in this phase covers the two Python service images and their reusable release workflows, plus the server-side Next.js proxy code compiled by CI. The manager `/` page, candidate `/apply` page, and all legacy demo routes intentionally return 404 in production and are excluded from production feature eligibility.
+Production eligibility in this phase covered the two Python service images and their reusable release workflows, plus the server-side Next.js proxy code compiled by CI. At that phase, the manager `/` page, candidate `/apply` page, and legacy demo routes were excluded from production feature eligibility. The later invitation-gated candidate form is documented in [Production candidate applications](production-candidate-applications.md); the original legacy demo APIs remain closed.
 
 ## Release path
 

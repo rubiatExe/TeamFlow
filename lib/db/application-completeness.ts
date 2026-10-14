@@ -8,7 +8,9 @@ type ApplicationCandidateReference = { id?: string; resume_url: string };
 
 function webformApplicationId(candidate: ApplicationCandidateReference): string | undefined {
   if (!candidate.resume_url.startsWith('webform_')) return undefined;
-  const id = candidate.resume_url.slice('webform_'.length);
+  // Legacy web forms used `webform_<application id>` as a placeholder. New
+  // submissions use that prefix as a folder in the private résumé bucket.
+  const id = candidate.resume_url.slice('webform_'.length).split('/', 1)[0];
   return UUID.test(id) ? id : undefined;
 }
 

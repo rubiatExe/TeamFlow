@@ -153,7 +153,7 @@ The LangGraph service is not part of resume upload. If it is unavailable, manage
 
 | Boundary | Contract that must remain stable |
 |---|---|
-| Browser/server caller → Next.js | Local-demo-only `/api/parser`, `/api/candidates`, `/api/application`, `/api/invite`, and simulated `/api/square/labor` require `TEAMFLOW_ENABLE_LEGACY_DEMO_ROUTES=true` and remain closed in production; private `/api/parser/review`; legacy private `/api/parser/agent`; authenticated v2 `/api/resume-review-runs` list/start/detail/decision proxy; `RESUME_REVIEW_STORE_DOCUMENTS` and `RESUME_REVIEW_PERSIST_RESULTS` are Next-only flags |
+| Browser/server caller → Next.js | Local-demo-only `/api/parser`, `/api/candidates`, `/api/invite`, and simulated `/api/square/labor` require `TEAMFLOW_ENABLE_LEGACY_DEMO_ROUTES=true` and remain closed in production. Production `/api/application` uses a one-use applicant invitation, signed direct résumé upload, and server-side file validation; see [Production candidate applications](production-candidate-applications.md). Private `/api/parser/review`, legacy private `/api/parser/agent`, and authenticated v2 `/api/resume-review-runs` remain separate. `RESUME_REVIEW_STORE_DOCUMENTS` and `RESUME_REVIEW_PERSIST_RESULTS` are Next-only flags. |
 | Next.js → Cloud Run | `OCR_SERVICE_URL`, `POST /extract`, `X-OCR-Token` |
 | Next.js → LangGraph Cloud Run | `HIRING_AGENT_URL`, legacy `POST /invoke`, Phase 4 `POST /v1/resume-reviews`, Phase 6 `/v2/resume-review-runs`, `X-Agent-Token`, and the verified end-user bearer for v2 |
 | Cloud Run runtime | `GOOGLE_API_KEY`, `OCR_SERVICE_TOKEN`, `MOCK_MODE`, `ENVIRONMENT`, `OTEL_SERVICE_NAME` |

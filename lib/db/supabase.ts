@@ -298,6 +298,7 @@ export interface ApplicationSubmission {
         full_name: string;
         email: string;
         phone: string;
+        city?: string;
     };
     knockout_answers: Record<string, string | boolean>;
     profile: {
@@ -319,9 +320,18 @@ export interface ApplicationSubmission {
         above_and_beyond: string;
         skill_answers: Record<string, string>;
     };
+    resume?: {
+        file_name: string;
+        mime_type: string;
+        storage_path: string;
+        content_sha256: string;
+    };
 }
 
-export async function saveApplicationToSupabase(submission: ApplicationSubmission): Promise<string | null> {
+export async function saveApplicationToSupabase(
+    submission: ApplicationSubmission,
+    applicationId?: string,
+): Promise<string | null> {
     const db = getSupabase();
     if (!db) {
         console.log('[Supabase] Skipping application save — not configured');
@@ -332,6 +342,7 @@ export async function saveApplicationToSupabase(submission: ApplicationSubmissio
         const { data, error } = await db
             .from('applications')
             .insert({
+                ...(applicationId ? { id: applicationId } : {}),
                 candidate_id: submission.candidate_id,
                 role_id: submission.role_id,
                 data: submission,
@@ -348,6 +359,31 @@ export async function saveApplicationToSupabase(submission: ApplicationSubmissio
         return data?.id || null;
     } catch (err) {
         console.error('[Supabase] Unexpected error:', err);
+        return null;
+    }
+}
+
+/** Null means the lookup was unavailable; do not delete an upload in that case. */
+export async function applicationExistsInSupabase(applicationId: string): Promise<boolean | null> {
+    const db = getSupabase();
+    if (!db) return null;
+
+    try {
+        const { data, error } = await db.from('applications')
+            .select('id')
+            .eq('id', applicationId)
+            .maybeSingle();
+        if (error) {
+            console.warn('[Supabase] Application existence check failed', {
+                code: typeof error.code === 'string' ? error.code.slice(0, 80) : 'unknown',
+            });
+            return null;
+        }
+        return Boolean(data?.id);
+    } catch (error) {
+        console.warn('[Supabase] Application existence check failed unexpectedly', {
+            errorType: error instanceof Error ? error.name : 'UnknownError',
+        });
         return null;
     }
 }

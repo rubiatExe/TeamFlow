@@ -35,6 +35,18 @@ test('reads valid chunked JSON without trusting Content-Length', async () => {
   assert.deepEqual(result, { schema_version: '1.0' });
 });
 
+test('allows a route to raise its bounded frame limit for streamed résumé uploads', async () => {
+  const chunks = ['{"value":"', ...Array.from({ length: 100 }, () => 'a'), '"}'];
+  await assert.rejects(
+    readBoundedJson(chunkedRequest(chunks), 256),
+    InvalidRequestFramingError,
+  );
+  assert.deepEqual(
+    await readBoundedJson(chunkedRequest(chunks), 256, { maxFrames: 128 }),
+    { value: 'a'.repeat(100) },
+  );
+});
+
 test('requires one canonical application/json request framing before body read', () => {
   assert.doesNotThrow(() => validateBoundedJsonRequestHeaders({
     headers: new Headers({

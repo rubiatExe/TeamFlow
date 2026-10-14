@@ -239,15 +239,16 @@ and structured-output paths; a live provider smoke is still required before acti
 
 ## Known blockers that must not be hidden in interviews
 
-1. **Local-demo service-role application routes:** candidate list/delete, invite,
-   application, and parser routes still lack a real manager/candidate identity boundary.
-   They now require an explicit local-only flag and fail closed in production, so the
-   current UI demo is not a production access path.
-2. **Broken magic-link trust boundary:** the client only decodes token-shaped input, the
-   application API does not verify a signed token, invite/application routes are
-   unauthenticated, signing has a known development-secret fallback, and the local demo
-   returns the bearer URL. Logs no longer include the URL, message, name, or phone. The
-   README labels this as a demo, not complete auth.
+1. **Local-demo service-role routes:** candidate list/delete, legacy invite, and
+   parser routes still lack a real manager/candidate identity boundary. They
+   require an explicit local-only flag and fail closed in production. The later
+   production application route uses a separately verified one-use invitation;
+   see [Production candidate applications](production-candidate-applications.md).
+2. **Legacy magic-link trust boundary:** the local demo still only decodes
+   token-shaped input and retains a development-secret fallback. Production
+   applicant links instead use opaque random tokens stored as hashes, checked
+   server-side before upload, preview, or submission. Logs do not include
+   bearer links or applicant contact details.
 3. **OCR truth remains unmeasured:** the static fallback and provenance-drop defect are
    fixed, but source-block integrity proves consistency with extracted text—not fidelity
    to source pixels. Live Gemini OCR field survival, CER/WER, and complex-layout quality
@@ -257,14 +258,15 @@ and structured-output paths; a live provider smoke is still required before acti
    numeric score fields, the shared candidate writer rejects them, and legacy `/invoke`
    write requests fail closed. Durable score changes require the Phase 6 human-decision
    path; the preview itself is not a calibrated quality or fairness result.
-5. **Deployment upload/resource boundary:** application contracts and both HTTP stacks
-   enforce byte/type/signature/body-read/operation deadlines and URL ingestion is
-   disabled. PDF text parsing now runs in a killable two-slot subprocess with Linux
-   address-space/CPU/file-descriptor limits, cumulative decoded-text bounds, and tested
-   cancellation cleanup. The Next upload transport still carries bounded Base64 JSON
-   rather than a direct-to-private-storage object, so it is not the final large-file path.
-6. **No production upload/reviewer UI yet:** the legacy parser, application, invite, and
-   candidate routes are local-demo-only. The authenticated v2 backend derives tenancy,
+5. **Deployment upload/resource boundary:** the legacy demo transports bounded
+   Base64 JSON. The later production candidate form uses signed direct uploads
+   to private Storage, then validates the object server-side before extraction
+   and finalization. PDF text parsing runs in a killable two-slot subprocess with
+   Linux address-space/CPU/file-descriptor limits and tested cancellation cleanup.
+   No live production upload has been verified yet.
+6. **No production reviewer UI yet:** legacy parser, invite, and candidate-list
+   routes are local-demo-only. The production candidate form has an invitation
+   issuing API but no manager invitation screen. The authenticated v2 backend derives tenancy,
    bounds requests, and exposes pending-list/detail/decision operations, but no browser
    screen currently acquires a session, starts a run, or renders the queue. Assignment,
    claim leases, reviewer notifications, quotas, and SLA handling are not implemented.

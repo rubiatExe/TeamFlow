@@ -150,7 +150,7 @@ if (mode === 'development') {
     assert.ok(['live_embedding', 'deterministic_fallback'].includes(payload.retrieval.mode));
   });
 
-  test('public bakery-owner workspace is available while the legacy candidate page remains closed', async () => {
+  test('public bakery-owner workspace and invitation-gated candidate page are available', async () => {
     const publicResponse = await request('/');
     const html = await publicResponse.text();
     assert.equal(publicResponse.status, 200);
@@ -163,13 +163,31 @@ if (mode === 'development') {
     assert.match(html, /Smart Search/);
 
     const candidateResponse = await request('/apply');
-    assert.equal(candidateResponse.status, 404);
+    assert.equal(candidateResponse.status, 200);
     assertSecurityHeaders(candidateResponse);
+    assertSingleMain(await candidateResponse.text());
   });
 
-  test('legacy demo data routes stop at the production route gate', async () => {
+  test('unauthenticated production application requests are rejected before data access', async () => {
     for (const [path, method] of [
       ['/api/application', 'POST'],
+      ['/api/application/resume-preview', 'POST'],
+      ['/api/application/resume-upload', 'POST'],
+      ['/api/application/invitations', 'POST'],
+      ['/api/application/session', 'GET'],
+    ]) {
+      const response = await request(path, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        ...(method === 'POST' ? { body: '{}' } : {}),
+      });
+      assert.equal(response.status, 401, path);
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+    }
+  });
+
+  test('remaining legacy demo data routes stop at the production route gate', async () => {
+    for (const [path, method] of [
       ['/api/invite', 'POST'],
       ['/api/parser', 'POST'],
       ['/api/candidates', 'GET'],

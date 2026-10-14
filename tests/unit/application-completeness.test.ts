@@ -116,6 +116,19 @@ test('application lookup uses exact candidate and webform IDs, never identity ma
   assert.equal(result.get(candidateId)?.state, 'complete');
 });
 
+test('application lookup recognizes private résumé paths created by the application form', async context => {
+  context.mock.method(globalThis, 'fetch', async (input: RequestInfo | URL) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.searchParams.has('candidate_id')) return Response.json([]);
+    assert.equal(url.searchParams.get('id'), `in.(${applicationId})`);
+    return Response.json([{ ...completeApplication, candidate_id: null }]);
+  });
+  const db = createClient('https://application-completeness.invalid', 'synthetic-key');
+  const path = `webform_${applicationId}/57a63d6a-24d8-4fae-aea4-74168e00327c.pdf`;
+  const result = await loadApplicationCompleteness(db, [{ id: candidateId, resume_url: path }]);
+  assert.equal(result.get(candidateId)?.state, 'complete');
+});
+
 test('failed and missing referenced application lookups cannot become not-submitted', async context => {
   const db = createClient('https://application-completeness.invalid', 'synthetic-key');
   const fetchMock = context.mock.method(globalThis, 'fetch', async () => Response.json({ code: '42501' }, { status: 403 }));

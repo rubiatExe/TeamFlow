@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { createClient } from '@supabase/supabase-js';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,23 +11,82 @@ import { CandidateProfile, ProfileData } from '@/components/candidate-applicatio
 import { SkillsExperience, SkillsData } from '@/components/candidate-application/skills-experience';
 import { MotivationQuestions, MotivationData } from '@/components/candidate-application/motivation-questions';
 import {
+    getRoleById,
     getRoleOrDefault,
     type RoleQuestion,
 } from '@/lib/domain/roles';
+import { ResumePrefillSchema } from '@/lib/domain/resume-prefill';
+
+function encodeResumeFile(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Could not read the selected resume.'));
+        reader.onload = () => {
+            if (typeof reader.result !== 'string') {
+                reject(new Error('Could not read the selected resume.'));
+                return;
+            }
+            const comma = reader.result.indexOf(',');
+            if (comma < 0) {
+                reject(new Error('Could not read the selected resume.'));
+                return;
+            }
+            resolve(reader.result.slice(comma + 1));
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+function equalStrings(left: string[], right: string[]): boolean {
+    return left.length === right.length && left.every((value, index) => value === right[index]);
+}
 
 interface TokenPayload {
-    candidateId: string;
-    candidateName: string;
+    candidateId?: string;
+    candidateName?: string;
     merchantName?: string;
     jobId?: string;
     roleId?: string;
 }
 
-type Step = 'loading' | 'welcome' | 'basicInfo' | 'questions' | 'profile' | 'skills' | 'motivation' | 'passed' | 'needsReview' | 'complete' | 'error';
+type ApplicationMode = 'demo' | 'production';
+
+type UploadedResume = { file: File; id: string };
+type PendingResumeGrant = {
+    file: File;
+    grant: { id: string; path: string; signedToken: string };
+    attempts: number;
+};
+
+function parseUploadGrant(value: unknown): { id: string; path: string; signedToken: string } | null {
+    if (!value || typeof value !== 'object') return null;
+    const record = value as Record<string, unknown>;
+    if (record.success !== true || !record.upload || typeof record.upload !== 'object') return null;
+    const upload = record.upload as Record<string, unknown>;
+    if (typeof upload.id !== 'string' || typeof upload.path !== 'string' || typeof upload.signedToken !== 'string') return null;
+    return { id: upload.id, path: upload.path, signedToken: upload.signedToken };
+}
+
+function parseApplicationSession(value: unknown): TokenPayload | null {
+    if (!value || typeof value !== 'object') return null;
+    const record = value as Record<string, unknown>;
+    if (record.success !== true || !record.session || typeof record.session !== 'object') return null;
+    const session = record.session as Record<string, unknown>;
+    if (typeof session.merchantName !== 'string' || typeof session.roleId !== 'string' || !getRoleById(session.roleId)) return null;
+    if (session.candidateName !== undefined && typeof session.candidateName !== 'string') return null;
+    return {
+        candidateName: session.candidateName as string | undefined,
+        merchantName: session.merchantName,
+        roleId: session.roleId,
+    };
+}
+
+type Step = 'loading' | 'welcome' | 'basicInfo' | 'questions' | 'profile' | 'skills' | 'motivation' | 'passed' | 'needsReview' | 'complete' | 'error' | 'serviceError';
 
 type SubmissionFailure = {
     message: string;
     retryable: boolean;
+    code?: string;
 };
 
 type ApplicationApiResult =
@@ -57,7 +117,11 @@ function parseApplicationApiResult(value: unknown): ApplicationApiResult | null 
     if (typeof error.message !== 'string' || typeof error.retryable !== 'boolean') return null;
     return {
         success: false,
-        error: { message: error.message, retryable: error.retryable },
+        error: {
+            message: error.message,
+            retryable: error.retryable,
+            code: typeof error.code === 'string' ? error.code : undefined,
+        },
     };
 }
 
@@ -70,7 +134,7 @@ const STEPS = [
     { id: 'motivation', label: 'About You' },
 ];
 
-function ApplyPageContent() {
+function ApplyPageContent({ mode }: { mode: ApplicationMode }) {
     const searchParams = useSearchParams();
     const token = searchParams.get('token');
 
@@ -82,6 +146,18 @@ function ApplyPageContent() {
     const [submissionFailure, setSubmissionFailure] = useState<SubmissionFailure | null>(null);
     const [applicationId, setApplicationId] = useState<string | null>(null);
     const transitionHeadingRef = useRef<HTMLHeadingElement>(null);
+    const [resumeStatus, setResumeStatus] = useState<'idle' | 'reading' | 'ready' | 'error'>('idle');
+    const [resumeMessage, setResumeMessage] = useState<string | null>(null);
+    const [resumeUploaded, setResumeUploaded] = useState(false);
+    const [uploadAttempt, setUploadAttempt] = useState(0);
+    const [sessionAttempt, setSessionAttempt] = useState(0);
+    const encodedResumeRef = useRef<{ file: File; fileData: string } | null>(null);
+    const uploadedResumeRef = useRef<UploadedResume | null>(null);
+    const pendingResumeGrantRef = useRef<PendingResumeGrant | null>(null);
+    const manuallyEdited = useRef({
+        fullName: false, email: false, phone: false, city: false,
+        yearsExperience: false, skills: false, certifications: false, languages: false,
+    });
 
     // New state for enhanced sections
     const [profile, setProfile] = useState<ProfileData>({
@@ -96,7 +172,7 @@ function ApplyPageContent() {
         yearsExperience: '',
         skills: [],
         certifications: [],
-        languages: ['english'],
+        languages: [],
     });
 
     const [motivation, setMotivation] = useState<MotivationData>({
@@ -110,10 +186,198 @@ function ApplyPageContent() {
         fullName: '',
         email: '',
         phone: '',
+        city: '',
         resumeFile: null,
-        resumeUploading: false,
         selectedRoleId: 'barista',
     });
+
+    const handleBasicInfoChange = (next: BasicInfoData) => {
+        const update = mode === 'production' && payload?.roleId
+            ? { ...next, selectedRoleId: payload.roleId }
+            : next;
+        for (const field of ['fullName', 'email', 'phone', 'city'] as const) {
+            if (basicInfo[field] !== update[field]) manuallyEdited.current[field] = true;
+        }
+        if (basicInfo.selectedRoleId !== update.selectedRoleId) {
+            manuallyEdited.current.skills = false;
+            manuallyEdited.current.certifications = false;
+            setSkills(previous => ({ ...previous, skills: [], certifications: [] }));
+            if (update.resumeFile) setResumeStatus('reading');
+        }
+        if (basicInfo.resumeFile !== update.resumeFile) {
+            encodedResumeRef.current = null;
+            uploadedResumeRef.current = null;
+            pendingResumeGrantRef.current = null;
+            setResumeUploaded(false);
+            setResumeStatus(update.resumeFile ? 'reading' : 'idle');
+            setResumeMessage(null);
+            setBasicInfo({
+                ...update,
+                fullName: manuallyEdited.current.fullName ? update.fullName : '',
+                email: manuallyEdited.current.email ? update.email : '',
+                phone: manuallyEdited.current.phone ? update.phone : '',
+                city: manuallyEdited.current.city ? update.city : '',
+            });
+            setSkills(previous => ({
+                yearsExperience: manuallyEdited.current.yearsExperience ? previous.yearsExperience : '',
+                skills: manuallyEdited.current.skills ? previous.skills : [],
+                certifications: manuallyEdited.current.certifications ? previous.certifications : [],
+                languages: manuallyEdited.current.languages ? previous.languages : [],
+            }));
+            return;
+        }
+        setBasicInfo(update);
+    };
+
+    const handleSkillsChange = (next: SkillsData) => {
+        if (skills.yearsExperience !== next.yearsExperience) manuallyEdited.current.yearsExperience = true;
+        for (const field of ['skills', 'certifications', 'languages'] as const) {
+            if (!equalStrings(skills[field], next[field])) manuallyEdited.current[field] = true;
+        }
+        setSkills(next);
+    };
+
+    useEffect(() => {
+        const file = basicInfo.resumeFile;
+        if (!file) return;
+
+        let active = true;
+        const controller = new AbortController();
+        const readResume = async () => {
+            setResumeStatus('reading');
+            setResumeMessage(null);
+            let uploadComplete = mode === 'demo';
+            try {
+                let previewBody: Record<string, string>;
+                const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+                if (mode === 'production') {
+                    if (!token) throw new Error('Missing invitation token');
+                    headers.Authorization = `Bearer ${token}`;
+                    let uploaded = uploadedResumeRef.current;
+                    let storageAccepted = uploaded?.file === file;
+                    if (uploaded?.file !== file) {
+                        let pending = pendingResumeGrantRef.current;
+                        if (pending?.file !== file) {
+                            const grantResponse = await fetch('/api/application/resume-upload', {
+                                method: 'POST',
+                                headers,
+                                body: JSON.stringify({ fileName: file.name, mimeType: file.type, size: file.size }),
+                                signal: controller.signal,
+                            });
+                            const grant = parseUploadGrant(await grantResponse.json().catch(() => null));
+                            if (!active) return;
+                            if (grantResponse.status === 401) {
+                                setStep('error');
+                                return;
+                            }
+                            if (!grantResponse.ok || !grant) throw new Error('Resume upload could not be authorized');
+                            pending = { file, grant, attempts: 0 };
+                            pendingResumeGrantRef.current = pending;
+                        }
+
+                        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+                        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+                        if (!supabaseUrl || !supabaseKey) throw new Error('Resume storage is unavailable');
+                        const storage = createClient(supabaseUrl, supabaseKey, {
+                            auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+                        }).storage;
+                        pending.attempts += 1;
+                        const { error: storageError } = await storage.from('resumes').uploadToSignedUrl(
+                            pending.grant.path, pending.grant.signedToken, file, { contentType: file.type },
+                        );
+                        if (!active) return;
+                        storageAccepted = !storageError;
+                        // A lost Storage response may still mean the object was saved.
+                        // The server validates the registered object in preview.
+                        uploaded = { file, id: pending.grant.id };
+                        uploadedResumeRef.current = uploaded;
+                    }
+                    setResumeUploaded(storageAccepted);
+                    uploadComplete = storageAccepted;
+                    previewBody = { uploadId: uploaded.id };
+                } else {
+                    const cached = encodedResumeRef.current;
+                    const fileData = cached?.file === file ? cached.fileData : await encodeResumeFile(file);
+                    if (!active) return;
+                    encodedResumeRef.current = { file, fileData };
+                    previewBody = {
+                        fileData,
+                        fileName: file.name,
+                        mimeType: file.type,
+                        roleId: basicInfo.selectedRoleId,
+                    };
+                }
+                const response = await fetch('/api/application/resume-preview', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(previewBody),
+                    signal: controller.signal,
+                });
+                const payload: unknown = await response.json().catch(() => null);
+                if (!active) return;
+                if (mode === 'production' && response.status === 401) {
+                    setStep('error');
+                    return;
+                }
+                const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : null;
+                if (mode === 'production' && !response.ok && record?.error
+                    && typeof record.error === 'object'
+                    && (record.error as Record<string, unknown>).code === 'INVALID_RESUME') {
+                    uploadedResumeRef.current = null;
+                    if ((pendingResumeGrantRef.current?.attempts ?? 0) >= 2) {
+                        pendingResumeGrantRef.current = null;
+                    }
+                    setResumeUploaded(false);
+                    uploadComplete = false;
+                }
+                if (mode === 'production' && record?.error
+                    && typeof record.error === 'object'
+                    && (record.error as Record<string, unknown>).code === 'EXTRACTION_UNAVAILABLE') {
+                    // The server verified the private object before OCR failed.
+                    setResumeUploaded(true);
+                    uploadComplete = true;
+                }
+                const parsed = ResumePrefillSchema.safeParse(record?.prefill);
+                if (!response.ok || record?.success !== true || !parsed.success) throw new Error('Resume extraction failed');
+
+                if (mode === 'production') setResumeUploaded(true);
+                const prefill = parsed.data;
+                setBasicInfo(previous => ({
+                    ...previous,
+                    fullName: manuallyEdited.current.fullName ? previous.fullName : prefill.fullName,
+                    email: manuallyEdited.current.email ? previous.email : prefill.email,
+                    phone: manuallyEdited.current.phone ? previous.phone : prefill.phone,
+                    city: manuallyEdited.current.city ? previous.city : prefill.city,
+                }));
+                setSkills(previous => ({
+                    yearsExperience: manuallyEdited.current.yearsExperience ? previous.yearsExperience : prefill.yearsExperience,
+                    skills: manuallyEdited.current.skills ? previous.skills : prefill.skills,
+                    certifications: manuallyEdited.current.certifications ? previous.certifications : prefill.certifications,
+                    languages: manuallyEdited.current.languages ? previous.languages : prefill.languages,
+                }));
+                setResumeStatus('ready');
+                const foundDetails = Boolean(
+                    prefill.fullName || prefill.email || prefill.phone || prefill.city
+                    || prefill.yearsExperience || prefill.skills.length
+                    || prefill.certifications.length || prefill.languages.length,
+                );
+                setResumeMessage(foundDetails
+                    ? 'Details found. Review and edit anything that is missing or incorrect.'
+                    : 'No form details were recognized. Fill in the fields yourself; your resume will still be attached.');
+            } catch {
+                if (!active) return;
+                setResumeStatus('error');
+                setResumeMessage(uploadComplete
+                    ? 'We could not read details from this resume. Enter them yourself; the file will still be attached when you submit.'
+                    : 'Your resume could not be verified. Retry the upload before continuing.');
+            }
+        };
+        void readResume();
+        return () => {
+            active = false;
+            controller.abort();
+        };
+    }, [basicInfo.resumeFile, basicInfo.selectedRoleId, mode, token, uploadAttempt]);
 
     // Get the role based on what the candidate selected
     const selectedRole = getRoleOrDefault(basicInfo.selectedRoleId);
@@ -125,7 +389,33 @@ function ApplyPageContent() {
             return;
         }
 
-        // In production, verify token via API. For demo, decode locally.
+        if (mode === 'production') {
+            const controller = new AbortController();
+            const loadSession = async () => {
+                try {
+                    const response = await fetch(`/api/application/session?token=${encodeURIComponent(token)}`, {
+                        cache: 'no-store',
+                        signal: controller.signal,
+                    });
+                    const session = parseApplicationSession(await response.json().catch(() => null));
+                    if (controller.signal.aborted) return;
+                    if (!response.ok || !session?.roleId) {
+                        setStep(response.status === 401 ? 'error' : 'serviceError');
+                        return;
+                    }
+                    const roleId = session.roleId;
+                    setPayload(session);
+                    setBasicInfo(previous => ({ ...previous, selectedRoleId: roleId }));
+                    setStep('welcome');
+                } catch {
+                    if (!controller.signal.aborted) setStep('serviceError');
+                }
+            };
+            void loadSession();
+            return () => controller.abort();
+        }
+
+        // Local demo invitations can use the existing unsigned sample payload.
         try {
             // Simple base64 decode of JWT payload (middle part)
             const parts = token.split('.');
@@ -155,7 +445,7 @@ function ApplyPageContent() {
             });
             setStep('welcome');
         }
-    }, [token]);
+    }, [mode, token, sessionAttempt]);
 
     useEffect(() => {
         if (step !== 'loading') transitionHeadingRef.current?.focus();
@@ -203,27 +493,73 @@ function ApplyPageContent() {
     };
 
     const handleSubmitApplication = async () => {
+        const resumeFile = basicInfo.resumeFile;
+        if (!resumeFile) {
+            setResumeStatus('error');
+            setResumeMessage('A resume is required to submit your application.');
+            setStep('basicInfo');
+            return;
+        }
+        const uploaded = uploadedResumeRef.current;
+        if (mode === 'production' && (!resumeUploaded || uploaded?.file !== resumeFile)) {
+            setResumeStatus('error');
+            setResumeMessage('Your resume did not upload. Retry the upload before continuing.');
+            setStep('basicInfo');
+            return;
+        }
         setSubmitting(true);
         setSubmissionFailure(null);
 
-        const applicationData = {
-            candidateId: payload?.candidateId,
-            roleId: basicInfo.selectedRoleId,
-            basicInfo: {
-                fullName: basicInfo.fullName,
-                email: basicInfo.email,
-                phone: basicInfo.phone,
-            },
-            knockoutAnswers: answers,
-            profile,
-            skills,
-            motivation,
+        const recoverSavedApplication = async (): Promise<boolean> => {
+            if (mode !== 'production' || !token || !uploaded) return false;
+            try {
+                const receiptResponse = await fetch(
+                    `/api/application/receipt?uploadId=${encodeURIComponent(uploaded.id)}`,
+                    { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' },
+                );
+                const receipt = parseApplicationApiResult(await receiptResponse.json().catch(() => null));
+                if (!receiptResponse.ok || !receipt?.success) return false;
+                setApplicationId(receipt.applicationId);
+                setStep(receipt.passed ? 'complete' : 'needsReview');
+                return true;
+            } catch {
+                return false;
+            }
         };
 
         try {
+            let attachment: { uploadId: string } | { resume: { fileData: string; fileName: string; mimeType: string } };
+            if (mode === 'production') {
+                attachment = { uploadId: uploaded!.id };
+            } else {
+                const cached = encodedResumeRef.current;
+                const fileData = cached?.file === resumeFile
+                    ? cached.fileData
+                    : await encodeResumeFile(resumeFile);
+                encodedResumeRef.current = { file: resumeFile, fileData };
+                attachment = { resume: { fileData, fileName: resumeFile.name, mimeType: resumeFile.type } };
+            }
+            const applicationData = {
+                ...(mode === 'demo' ? { candidateId: payload?.candidateId } : {}),
+                roleId: basicInfo.selectedRoleId,
+                basicInfo: {
+                    fullName: basicInfo.fullName,
+                    email: basicInfo.email,
+                    phone: basicInfo.phone,
+                    city: basicInfo.city,
+                },
+                knockoutAnswers: answers,
+                profile,
+                skills,
+                motivation,
+                ...attachment,
+            };
             const res = await fetch('/api/application', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(mode === 'production' && token ? { Authorization: `Bearer ${token}` } : {}),
+                },
                 body: JSON.stringify(applicationData),
             });
 
@@ -231,6 +567,17 @@ function ApplyPageContent() {
             if (res.ok && result?.success) {
                 setApplicationId(result.applicationId);
                 setStep(result.passed ? 'complete' : 'needsReview');
+                return;
+            }
+            if (await recoverSavedApplication()) return;
+
+            if (mode === 'production' && result && !result.success
+                && result.error.code === 'INVALID_RESUME') {
+                uploadedResumeRef.current = null;
+                setResumeUploaded(false);
+                setResumeStatus('error');
+                setResumeMessage('Your resume could not be verified. Retry the upload before continuing.');
+                setStep('basicInfo');
                 return;
             }
 
@@ -241,6 +588,7 @@ function ApplyPageContent() {
                     retryable: true,
                 });
         } catch {
+            if (await recoverSavedApplication()) return;
             setSubmissionFailure({
                 message: 'We could not reach the application service. Your answers are still here; please try again.',
                 retryable: true,
@@ -269,12 +617,23 @@ function ApplyPageContent() {
                     </div>
                 );
 
+            case 'serviceError':
+                return (
+                    <div className="text-center py-20">
+                        <h2 ref={transitionHeadingRef} tabIndex={-1} className="text-2xl font-semibold text-stone-800 mb-2 focus:outline-none">Application unavailable</h2>
+                        <p className="text-stone-600 mb-5">We could not check your application link right now. Please try again.</p>
+                        <Button onClick={() => { setStep('loading'); setSessionAttempt(value => value + 1); }}>
+                            Try again
+                        </Button>
+                    </div>
+                );
+
             case 'welcome':
                 return (
                     <div className="text-center py-10">
                         <div className="text-6xl mb-6">☕</div>
                         <h2 ref={transitionHeadingRef} tabIndex={-1} className="text-2xl font-semibold text-stone-800 mb-3 focus:outline-none">
-                            Welcome, {payload?.candidateName}!
+                            Welcome{payload?.candidateName ? `, ${payload.candidateName}` : ''}!
                         </h2>
                         <p className="text-lg text-stone-600 mb-2">
                             {payload?.merchantName || 'Our team'} is excited to learn more about you.
@@ -302,7 +661,12 @@ function ApplyPageContent() {
                         </div>
                         <BasicInfo
                             data={basicInfo}
-                            onChange={setBasicInfo}
+                            onChange={handleBasicInfoChange}
+                            resumeStatus={resumeStatus}
+                            resumeMessage={resumeMessage}
+                            resumeUploaded={mode === 'demo' || resumeUploaded}
+                            onRetryUpload={mode === 'production' ? () => setUploadAttempt(previous => previous + 1) : undefined}
+                            roleLocked={mode === 'production'}
                             onNext={() => {
                                 // Reset knockout state when role changes
                                 setCurrentQuestion(0);
@@ -318,7 +682,7 @@ function ApplyPageContent() {
                 if (!question) {
                     return (
                         <div role="alert" className="py-10 text-center text-red-700">
-                            This demo role has no question configured. Go back and choose another role.
+                            This role has no question configured. Please contact the employer.
                         </div>
                     );
                 }
@@ -438,7 +802,7 @@ function ApplyPageContent() {
                         </div>
                         <SkillsExperience
                             data={skills}
-                            onChange={setSkills}
+                            onChange={handleSkillsChange}
                             onNext={() => setStep('motivation')}
                             onBack={() => setStep('profile')}
                             roleId={basicInfo.selectedRoleId}
@@ -476,8 +840,8 @@ function ApplyPageContent() {
                             Reviewers at {payload?.merchantName || 'the team'} will evaluate your answers after submission.
                         </p>
                         {basicInfo.resumeFile && (
-                            <p className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-                                Your selected resume is not uploaded by this demo form. Only the answers shown here will be submitted.
+                            <p className="mb-4 rounded-lg bg-lime-50 p-3 text-sm text-lime-900">
+                                Your resume, {basicInfo.resumeFile.name}, will be attached to this application. You can go back to correct any filled details.
                             </p>
                         )}
                         {submissionFailure && (
@@ -503,7 +867,10 @@ function ApplyPageContent() {
                             </Button>
                             <Button
                                 variant="ghost"
-                                onClick={() => setStep('motivation')}
+                                onClick={() => {
+                                    setSubmissionFailure(null);
+                                    setStep('motivation');
+                                }}
                                 className="text-stone-600 hover:text-stone-800"
                                 disabled={submitting}
                             >
@@ -573,9 +940,11 @@ function ApplyPageContent() {
                 {payload?.merchantName && (
                     <p className="text-stone-600 text-sm">Application for {payload.merchantName}</p>
                 )}
-                <p className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-900">
-                    Local demo — not a production authentication or hiring workflow
-                </p>
+                {mode === 'demo' && (
+                    <p className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-900">
+                        Local demo — not a production authentication or hiring workflow
+                    </p>
+                )}
             </CardHeader>
             <CardContent className="min-w-0 px-4 pt-6 sm:px-6" aria-busy={submitting}>
                 <p className="sr-only" aria-live="polite">
@@ -606,11 +975,11 @@ function LoadingFallback() {
     );
 }
 
-export function ApplicationFlow() {
+export function ApplicationFlow({ mode }: { mode: ApplicationMode }) {
     return (
         <main className="min-h-screen min-w-0 bg-stone-50 flex items-start justify-center px-2 py-4 sm:items-center sm:p-4">
             <Suspense fallback={<LoadingFallback />}>
-                <ApplyPageContent />
+                <ApplyPageContent mode={mode} />
             </Suspense>
         </main>
     );

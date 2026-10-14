@@ -8,8 +8,8 @@ export interface BasicInfoData {
     fullName: string;
     email: string;
     phone: string;
+    city: string;
     resumeFile: File | null;
-    resumeUploading: boolean;
     selectedRoleId: string;
 }
 
@@ -17,6 +17,11 @@ interface BasicInfoProps {
     data: BasicInfoData;
     onChange: (data: BasicInfoData) => void;
     onNext: () => void;
+    resumeStatus: 'idle' | 'reading' | 'ready' | 'error';
+    resumeMessage: string | null;
+    resumeUploaded?: boolean;
+    onRetryUpload?: () => void;
+    roleLocked?: boolean;
 }
 
 const MAX_RESUME_BYTES = 10 * 1024 * 1024;
@@ -24,16 +29,18 @@ const RESUME_TYPES = new Set(['application/pdf', 'image/jpeg', 'image/png']);
 
 function validateResumeFile(file: File): string | null {
     if (!RESUME_TYPES.has(file.type)) return 'Choose a PDF, JPG, or PNG file.';
+    if (file.size === 0) return 'Choose a nonempty resume file.';
     if (file.size > MAX_RESUME_BYTES) return 'Choose a file smaller than 10 MB.';
     return null;
 }
 
-export function BasicInfo({ data, onChange, onNext }: BasicInfoProps) {
+export function BasicInfo({ data, onChange, onNext, resumeStatus, resumeMessage, resumeUploaded = true, onRetryUpload, roleLocked = false }: BasicInfoProps) {
     const [dragActive, setDragActive] = useState(false);
     const [fileError, setFileError] = useState<string | null>(null);
     const fileInputId = useId();
     const roleHelpId = useId();
     const resumeHelpId = useId();
+    const resumeStatusId = useId();
 
     const selectFile = useCallback((file: File) => {
         const error = validateResumeFile(file);
@@ -71,23 +78,98 @@ export function BasicInfo({ data, onChange, onNext }: BasicInfoProps) {
     const isValid = data.fullName.trim().length >= 2
         && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)
         && data.phone.replace(/\D/g, '').length >= 10
+        && Boolean(data.resumeFile)
+        && resumeUploaded
+        && resumeStatus !== 'reading'
         && data.selectedRoleId !== '';
 
     return (
         <div className="py-4 space-y-5">
+            <fieldset>
+                <legend className="text-base font-semibold text-stone-800">
+                    Resume <span aria-hidden="true" className="text-red-600">*</span>
+                </legend>
+                <p id={resumeHelpId} className="mb-2 text-xs text-stone-600">
+                    Upload a PDF, JPG, or PNG up to 10 MB. We&apos;ll fill in details we can read. Review and edit every answer before submitting.
+                </p>
+                {data.resumeFile ? (
+                    <div className="flex min-w-0 items-center gap-3 p-4 bg-lime-50 border-2 border-lime-300 rounded-xl">
+                        <span aria-hidden="true" className="text-2xl">📄</span>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-stone-800 truncate">{data.resumeFile.name}</p>
+                            <p className="text-xs text-stone-600">{(data.resumeFile.size / 1024).toFixed(1)} KB · required attachment</p>
+                        </div>
+                        <button
+                            type="button"
+                            aria-label={`Remove ${data.resumeFile.name}`}
+                            onClick={() => {
+                                setFileError(null);
+                                onChange({ ...data, resumeFile: null });
+                            }}
+                            className="min-h-11 min-w-11 rounded-lg text-stone-600 hover:bg-red-50 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600"
+                        >
+                            <span aria-hidden="true">✕</span>
+                        </button>
+                    </div>
+                ) : (
+                    <>
+                        <input
+                            id={fileInputId}
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            aria-required="true"
+                            aria-describedby={`${resumeHelpId} ${resumeStatusId}`}
+                            onChange={handleFileInput}
+                            className="peer sr-only"
+                        />
+                        <label
+                            htmlFor={fileInputId}
+                            onDragEnter={handleDrag}
+                            onDragLeave={handleDrag}
+                            onDragOver={handleDrag}
+                            onDrop={handleDrop}
+                            className={`block cursor-pointer rounded-xl border-2 border-dashed p-5 text-center transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-lime-600 peer-focus-visible:ring-offset-2 ${dragActive
+                                ? 'border-lime-600 bg-lime-50'
+                                : 'border-stone-300 bg-stone-50 hover:border-stone-500'
+                                }`}
+                        >
+                            <span aria-hidden="true" className="mb-2 block text-3xl">📎</span>
+                            <span className="block text-sm font-medium text-stone-700">Drop your resume here or browse</span>
+                        </label>
+                    </>
+                )}
+                <p
+                    id={resumeStatusId}
+                    role={resumeStatus === 'error' || fileError ? 'alert' : 'status'}
+                    className={`mt-2 min-h-5 text-sm ${resumeStatus === 'error' || fileError ? 'text-amber-800' : 'text-stone-600'}`}
+                >
+                    {fileError || (resumeStatus === 'reading'
+                        ? (resumeUploaded ? 'Reading your resume…' : 'Uploading your resume…')
+                        : resumeMessage)}
+                </p>
+                {data.resumeFile && !resumeUploaded && resumeStatus === 'error' && onRetryUpload && (
+                    <Button type="button" variant="outline" onClick={onRetryUpload} className="mt-2 min-h-11">
+                        Retry resume upload
+                    </Button>
+                )}
+            </fieldset>
+
             <fieldset aria-describedby={roleHelpId}>
                 <legend className="text-base font-semibold text-stone-800">
                     What position are you applying for? <span aria-hidden="true" className="text-red-600">*</span>
                 </legend>
-                <p id={roleHelpId} className="mb-2 text-xs text-stone-500">Choose one required position.</p>
+                <p id={roleHelpId} className="mb-2 text-xs text-stone-500">
+                    {roleLocked ? 'Your invitation is for this position.' : 'Choose one required position.'}
+                </p>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    {CAFE_ROLES.map(role => {
+                    {CAFE_ROLES.filter(role => !roleLocked || role.id === data.selectedRoleId).map(role => {
                         const selected = data.selectedRoleId === role.id;
                         return (
                             <button
                                 key={role.id}
                                 type="button"
                                 aria-pressed={selected}
+                                disabled={roleLocked}
                                 onClick={() => onChange({ ...data, selectedRoleId: role.id })}
                                 className={`min-h-12 p-3 rounded-xl text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-600 focus-visible:ring-offset-2 ${selected
                                     ? 'bg-lime-100 border-2 border-lime-600'
@@ -163,60 +245,21 @@ export function BasicInfo({ data, onChange, onNext }: BasicInfoProps) {
                 />
             </div>
 
-            <fieldset>
-                <legend className="text-base font-semibold text-stone-800">
-                    Resume <span className="text-stone-500 font-normal">(optional)</span>
-                </legend>
-                <p id={resumeHelpId} className="mb-2 text-xs text-stone-600">
-                    Select a PDF, JPG, or PNG up to 10 MB. This local demo keeps the selection in your browser and does not upload it with the form.
-                </p>
-                {data.resumeFile ? (
-                    <div className="flex min-w-0 items-center gap-3 p-4 bg-lime-50 border-2 border-lime-300 rounded-xl">
-                        <span aria-hidden="true" className="text-2xl">📄</span>
-                        <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-stone-800 truncate">{data.resumeFile.name}</p>
-                            <p className="text-xs text-stone-600">{(data.resumeFile.size / 1024).toFixed(1)} KB · selected locally</p>
-                        </div>
-                        <button
-                            type="button"
-                            aria-label={`Remove ${data.resumeFile.name}`}
-                            onClick={() => {
-                                setFileError(null);
-                                onChange({ ...data, resumeFile: null });
-                            }}
-                            className="min-h-11 min-w-11 rounded-lg text-stone-600 hover:bg-red-50 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600"
-                        >
-                            <span aria-hidden="true">✕</span>
-                        </button>
-                    </div>
-                ) : (
-                    <>
-                        <input
-                            id={fileInputId}
-                            type="file"
-                            accept=".pdf,.jpg,.jpeg,.png"
-                            aria-describedby={resumeHelpId}
-                            onChange={handleFileInput}
-                            className="peer sr-only"
-                        />
-                        <label
-                            htmlFor={fileInputId}
-                            onDragEnter={handleDrag}
-                            onDragLeave={handleDrag}
-                            onDragOver={handleDrag}
-                            onDrop={handleDrop}
-                            className={`block cursor-pointer rounded-xl border-2 border-dashed p-5 text-center transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-lime-600 peer-focus-visible:ring-offset-2 ${dragActive
-                                ? 'border-lime-600 bg-lime-50'
-                                : 'border-stone-300 bg-stone-50 hover:border-stone-500'
-                                }`}
-                        >
-                            <span aria-hidden="true" className="mb-2 block text-3xl">📎</span>
-                            <span className="block text-sm font-medium text-stone-700">Drop a file here or browse</span>
-                        </label>
-                    </>
-                )}
-                <p role="alert" className="mt-2 min-h-5 text-sm text-red-700">{fileError}</p>
-            </fieldset>
+            <div>
+                <label htmlFor="candidate-city" className="block text-base font-semibold text-stone-800 mb-2">
+                    City <span className="text-stone-500 font-normal">(optional)</span>
+                </label>
+                <input
+                    id="candidate-city"
+                    name="city"
+                    type="text"
+                    autoComplete="address-level2"
+                    value={data.city}
+                    onChange={(event) => onChange({ ...data, city: event.target.value })}
+                    placeholder="e.g. Jersey City"
+                    className="w-full min-w-0 bg-stone-50 border border-stone-300 rounded-xl px-4 py-3 text-stone-800 placeholder:text-stone-500 focus:outline-none focus:ring-2 focus:ring-lime-600 focus:border-lime-600"
+                />
+            </div>
 
             <div className="pt-2">
                 <Button

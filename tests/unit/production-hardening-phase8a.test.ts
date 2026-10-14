@@ -163,7 +163,7 @@ test('magic links remain an explicit local demo and have no production fallback 
   assert.equal(verifyMagicToken(token)?.candidateId, 'demo-candidate');
 });
 
-test('the public Cocoa dashboard receives the local-only capability while the candidate portal remains gated', () => {
+test('the public Cocoa dashboard remains read-only while candidate links require server verification', () => {
   const publicPage = readFileSync('app/page.tsx', 'utf8');
   const dashboard = readFileSync('components/candidates/manager-dashboard.tsx', 'utf8');
   const candidatePage = readFileSync('app/apply/page.tsx', 'utf8');
@@ -175,5 +175,8 @@ test('the public Cocoa dashboard receives the local-only capability while the ca
   assert.match(dashboard, /Invitations are disabled in the public preview/u);
   assert.match(dashboard, /disabled=\{!interactiveDemoEnabled\}/u);
   assert.match(candidatePage, /legacyDemoRoutesEnabled\(\)/u);
-  assert.match(candidatePage, /notFound\(\)/u);
+  assert.match(candidatePage, /mode=\{legacyDemoRoutesEnabled\(\) \? 'demo' : 'production'\}/u);
+  const candidateFlow = readFileSync('components/candidate-application/application-flow.tsx', 'utf8');
+  assert.match(candidateFlow, /\/api\/application\/session\?token=/u);
+  assert.match(candidateFlow, /uploadToSignedUrl/u);
 });

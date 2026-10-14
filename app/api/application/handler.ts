@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server.js';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import {
+    applicationExistsInSupabase,
     saveApplicationToSupabase,
     saveCandidateToSupabase,
     type ApplicationSubmission,
@@ -13,22 +15,39 @@ import {
     RequestBodyTooLargeError,
 } from '../../../lib/http/bounded-json.ts';
 import { guardLegacyDemoRoute } from '../../../lib/http/legacy-demo-route.ts';
+import { deleteResume, uploadResume } from '../../../lib/db/storage.ts';
+import {
+    DocumentProcessorError,
+    requestDocumentExtraction,
+} from '../../../lib/ai/document-processor-client.ts';
+import { ParserInputSchema } from '../../../lib/contracts/parser.ts';
+import { matchesResumeSignature, resumeExtension } from '../../../lib/domain/resume-file.ts';
 import {
     getRoleById,
     isRoleQuestionAnswerTypeValid,
     isRoleQuestionFailure,
 } from '../../../lib/domain/roles.ts';
 
-const MAX_APPLICATION_REQUEST_BYTES = 64 * 1024;
+// A 10 MiB file becomes at most 13,981,016 base64 characters. Leave room for
+// the other bounded application fields without accepting an unbounded upload.
+const MAX_APPLICATION_REQUEST_BYTES = 14_200_000;
+const MAX_APPLICATION_BODY_FRAMES = 2048;
+const RESUME_EXTRACTION_TIMEOUT_MS = 25_000;
+const ResumeSchema = ParserInputSchema.pick({
+    fileData: true,
+    mimeType: true,
+    fileName: true,
+}).strict();
 
 const StringListSchema = z.array(z.string().trim().min(1).max(120)).max(50);
-const ApplicationRequestSchema = z.object({
+export const ApplicationRequestSchema = z.object({
     candidateId: z.string().trim().min(1).max(200).optional(),
     roleId: z.string().trim().min(1).max(100),
     basicInfo: z.object({
         fullName: z.string().trim().min(2).max(200),
         email: z.email().max(320),
         phone: z.string().trim().max(40).default(''),
+        city: z.string().trim().max(200).default(''),
     }).strict(),
     knockoutAnswers: z.record(
         z.string().trim().min(1).max(100),
@@ -53,6 +72,7 @@ const ApplicationRequestSchema = z.object({
         aboveAndBeyond: z.string().max(2_000).default(''),
         skillAnswers: z.record(z.string().max(100), z.string().max(2_000)).default({}),
     }).strict(),
+    resume: ResumeSchema,
 }).strict();
 
 export type ApplicationFailureCode =
@@ -64,12 +84,40 @@ export type ApplicationFailureCode =
 type ApplicationRouteDependencies = {
     saveApplication: typeof saveApplicationToSupabase;
     saveCandidate: typeof saveCandidateToSupabase;
+    uploadResume: typeof uploadResume;
+    deleteResume: typeof deleteResume;
+    applicationExists: typeof applicationExistsInSupabase;
+    extractResume: typeof requestDocumentExtraction;
 };
 
 const defaultDependencies: ApplicationRouteDependencies = {
     saveApplication: saveApplicationToSupabase,
     saveCandidate: saveCandidateToSupabase,
+    uploadResume,
+    deleteResume,
+    applicationExists: applicationExistsInSupabase,
+    extractResume: requestDocumentExtraction,
 };
+
+async function deleteUnreferencedResume(
+    services: ApplicationRouteDependencies,
+    applicationId: string,
+    storagePath: string,
+): Promise<void> {
+    try {
+        // A failed insert response can still be ambiguous. Remove applicant data
+        // only when a fresh database read confirms no application references it.
+        const applicationExists = await services.applicationExists(applicationId);
+        if (applicationExists !== false) return;
+        if (!await services.deleteResume(storagePath)) {
+            console.warn('[Application API] Unreferenced résumé cleanup failed');
+        }
+    } catch (error) {
+        console.warn('[Application API] Unreferenced résumé cleanup failed', {
+            errorType: error instanceof Error ? error.name : 'UnknownError',
+        });
+    }
+}
 
 function json(body: unknown, status: number): NextResponse {
     return NextResponse.json(body, {
@@ -90,7 +138,7 @@ function failure(
     return json({ success: false, error: { code, message, retryable } }, status);
 }
 
-function generateMarkdownFromSubmission(submission: ApplicationSubmission): string {
+export function generateMarkdownFromSubmission(submission: ApplicationSubmission): string {
     const { basic_info, profile, skills, motivation } = submission;
 
     return `
@@ -98,7 +146,7 @@ function generateMarkdownFromSubmission(submission: ApplicationSubmission): stri
 
 **Email:** ${basic_info.email}
 **Phone:** ${basic_info.phone || 'Not provided'}
-**Location:** ${profile.transportation ? 'Local area (Has transportation)' : 'Local area'}
+**Location:** ${basic_info.city || 'Not provided'}
 
 ## Availability
 - **Preferred Shifts:** ${profile.preferred_shifts.join(', ') || 'Not specified'}
@@ -108,7 +156,7 @@ function generateMarkdownFromSubmission(submission: ApplicationSubmission): stri
 ## Experience & Skills
 - **Years of Experience:** ${skills.years_experience}
 - **Relevant Skills:** ${skills.skills.join(', ') || 'None listed'}
-- **Languages:** ${skills.languages.join(', ') || 'English'}
+- **Languages:** ${skills.languages.join(', ') || 'Not specified'}
 - **Certifications:** ${skills.certifications.join(', ') || 'None'}
 
 ## Motivation & Personality
@@ -124,15 +172,18 @@ ${motivation.above_and_beyond || 'No answer provided.'}
 }
 
 export function createApplicationPost(
-    dependencies: ApplicationRouteDependencies = defaultDependencies,
+    dependencies: Partial<ApplicationRouteDependencies> = {},
 ) {
+    const services = { ...defaultDependencies, ...dependencies };
     return async function applicationPost(req: NextRequest): Promise<NextResponse> {
         const blocked = guardLegacyDemoRoute();
         if (blocked) return blocked as NextResponse;
 
         let rawBody: unknown;
         try {
-            rawBody = await readBoundedJson(req, MAX_APPLICATION_REQUEST_BYTES);
+            rawBody = await readBoundedJson(req, MAX_APPLICATION_REQUEST_BYTES, {
+                maxFrames: MAX_APPLICATION_BODY_FRAMES,
+            });
         } catch (error) {
             if (error instanceof RequestBodyTooLargeError) {
                 return failure('REQUEST_TOO_LARGE', 'The application is too large to submit.', 413, false);
@@ -146,6 +197,11 @@ export function createApplicationPost(
         }
 
         const body = parsedBody.data;
+        const resumeBytes = Buffer.from(body.resume.fileData, 'base64');
+        const extension = resumeExtension(body.resume.mimeType, body.resume.fileName);
+        if (!extension || !matchesResumeSignature(resumeBytes, body.resume.mimeType)) {
+            return failure('INVALID_REQUEST', 'Please attach a valid PDF, JPG, or PNG résumé.', 400, false);
+        }
         const role = getRoleById(body.roleId);
         if (!role) {
             return failure('INVALID_REQUEST', 'Please choose a supported role.', 400, false);
@@ -173,12 +229,14 @@ export function createApplicationPost(
         const passed = failedKnockouts.length === 0;
 
         const submission: ApplicationSubmission = {
-            candidate_id: body.candidateId,
+            // The legacy invite payload is only decoded in the browser, so it
+            // cannot establish an authorized candidate relationship here.
             role_id: body.roleId,
             basic_info: {
                 full_name: body.basicInfo.fullName,
                 email: body.basicInfo.email,
                 phone: body.basicInfo.phone,
+                city: body.basicInfo.city,
             },
             knockout_answers: body.knockoutAnswers,
             profile: {
@@ -202,10 +260,54 @@ export function createApplicationPost(
             },
         };
 
+        const applicationId = randomUUID();
+        const storagePath = `webform_${applicationId}/${randomUUID()}.${extension}`;
+        const resumeFile = new Blob([Uint8Array.from(resumeBytes)], { type: body.resume.mimeType });
+        const resumeContentSha256 = createHash('sha256').update(resumeBytes).digest('hex');
         let applicationWasSaved = false;
+        let uploadedPath: string | null = null;
         try {
-            const applicationId = await dependencies.saveApplication(submission);
-            if (!applicationId) {
+            uploadedPath = await services.uploadResume(resumeFile, storagePath);
+            if (uploadedPath !== storagePath) {
+                return failure(
+                    'PERSISTENCE_UNAVAILABLE',
+                    'Your résumé could not be saved. Your answers are still here; please try again.',
+                    503,
+                    true,
+                );
+            }
+            submission.resume = {
+                file_name: body.resume.fileName,
+                mime_type: body.resume.mimeType,
+                storage_path: uploadedPath,
+                content_sha256: resumeContentSha256,
+            };
+
+            const reviewedAnswers = generateMarkdownFromSubmission(submission);
+            let resumeText = reviewedAnswers;
+            try {
+                const extraction = await services.extractResume({
+                    bytes: resumeBytes,
+                    mimeType: body.resume.mimeType,
+                    fileName: body.resume.fileName,
+                    serviceUrl: process.env.OCR_SERVICE_URL || 'http://localhost:8000',
+                    token: process.env.OCR_SERVICE_TOKEN || '',
+                    timeoutMs: RESUME_EXTRACTION_TIMEOUT_MS,
+                });
+                const sourceHeading = '## Source résumé extraction';
+                const reviewedHeading = '## Applicant-reviewed form answers';
+                const surroundingText = `${sourceHeading}\n\n\n\n${reviewedHeading}\n\n${reviewedAnswers}`;
+                const sourceLimit = Math.max(0, 50_000 - surroundingText.length);
+                resumeText = `${sourceHeading}\n\n${extraction.markdown.slice(0, sourceLimit)}\n\n${reviewedHeading}\n\n${reviewedAnswers}`;
+            } catch (error) {
+                console.warn('[Application API] Resume extraction unavailable', {
+                    code: error instanceof DocumentProcessorError ? error.code : 'unknown',
+                });
+            }
+
+            const savedApplicationId = await services.saveApplication(submission, applicationId);
+            if (savedApplicationId !== applicationId) {
+                await deleteUnreferencedResume(services, applicationId, uploadedPath);
                 return failure(
                     'PERSISTENCE_UNAVAILABLE',
                     'Your application was not saved. Your answers are still here; please try again.',
@@ -220,16 +322,16 @@ export function createApplicationPost(
                 name: body.basicInfo.fullName,
                 email: body.basicInfo.email,
                 phone: body.basicInfo.phone,
-                city: 'Local Area',
+                city: body.basicInfo.city || 'Local Area',
                 status: 'new',
-                resume_url: `webform_${applicationId}`,
-                resume_text: generateMarkdownFromSubmission(submission),
+                resume_url: uploadedPath,
+                resume_text: resumeText,
                 summary: passed
                     ? 'Awaiting authorized human review'
                     : 'Required responses flagged for authorized human review',
                 source: 'Web Form',
             };
-            const candidateRecordId = await dependencies.saveCandidate(candidateRow);
+            const candidateRecordId = await services.saveCandidate(candidateRow);
             if (!candidateRecordId) {
                 return failure(
                     'PERSISTENCE_UNAVAILABLE',
@@ -247,6 +349,9 @@ export function createApplicationPost(
                 message: 'Application received.',
             }, 201);
         } catch (error) {
+            if (!applicationWasSaved && uploadedPath) {
+                await deleteUnreferencedResume(services, applicationId, uploadedPath);
+            }
             console.error('[Application API] Submission failed', {
                 errorType: error instanceof Error ? error.name : 'UnknownError',
             });

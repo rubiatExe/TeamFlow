@@ -39,6 +39,7 @@ const CANONICAL_CONTENT_LENGTH = /^(?:0|[1-9][0-9]*)$/u;
 
 type BoundedJsonOptions = {
   signal?: AbortSignal;
+  maxFrames?: number;
 };
 
 export type DeadlineSignal = Readonly<{
@@ -161,6 +162,10 @@ export async function readBoundedJson(
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
     throw new RangeError('maxBytes must be a positive safe integer');
   }
+  const maxFrames = options.maxFrames ?? MAX_BODY_FRAMES;
+  if (!Number.isSafeInteger(maxFrames) || maxFrames < 1 || maxFrames > 4096) {
+    throw new RangeError('maxFrames must be between 1 and 4096');
+  }
   if (!request.body) {
     throw new SyntaxError('Request body is empty');
   }
@@ -174,7 +179,7 @@ export async function readBoundedJson(
       const { done, value } = await readWithSignal(reader, options.signal);
       if (done) break;
       frameCount += 1;
-      if (frameCount > MAX_BODY_FRAMES || !(value instanceof Uint8Array)) {
+      if (frameCount > maxFrames || !(value instanceof Uint8Array)) {
         throw new InvalidRequestFramingError();
       }
       totalBytes += value.byteLength;
